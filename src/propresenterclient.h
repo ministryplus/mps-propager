@@ -45,6 +45,14 @@ public:
                                         const QString &number,
                                         const QJsonObject &theme);
 
+    // Flatten a GET /v1/themes response into one array of theme objects (each
+    // carrying a "slides" array) for pickTheme. The endpoint returns an OBJECT
+    // {"groups":[{... "themes":[...]}], "themes":[...]}, not a bare array — so
+    // parsing the reply as an array (as the first cut did) silently yielded an
+    // empty list. This gathers the top-level `themes` plus every group's
+    // `themes`.
+    static QJsonArray themesFromResponse(const QJsonObject &response);
+
     // Port of bot.py propres_create_message theme-lookup: return the id-object
     // of a slide whose id.name contains "vk" (case-insensitive); if none
     // matches, fall back to the first theme's first slide (themes[0].slides[0]

@@ -62,9 +62,40 @@ private slots:
         QCOMPARE(body.value("theme").toObject(), theme);
         QCOMPARE(body.value("visible_on_network").toBool(), true);
 
+        // ProPresenter 21.x requires a top-level is_active flag; omitting it
+        // makes POST/PUT /v1/messages reject the body with HTTP 400
+        // ("missing field `is_active`"). The message is not shown until
+        // trigger(), so it is created inactive.
+        QVERIFY2(body.contains("is_active"), "body must carry is_active");
+        QCOMPARE(body.value("is_active").toBool(), false);
+
         // No legacy hardcoded UUID leaks in (Decision 5 / Task 001-3).
         QVERIFY(!QString::fromUtf8(QJsonDocument(body).toJson())
                      .contains("942C3FC3"));
+    }
+
+    // GET /v1/themes returns an OBJECT {"groups":[...], "themes":[...]}, not an
+    // array; themesFromResponse flattens the top-level themes plus every
+    // group's themes into one array of theme objects for pickTheme.
+    void themesFromResponse_flattensTopLevelAndGroups()
+    {
+        const QJsonObject response{
+            {"themes", QJsonArray{themeWithSlides({"Plain"})}},
+            {"groups", QJsonArray{QJsonObject{
+                          {"themes", QJsonArray{themeWithSlides({"VK Number"})}}}}}};
+
+        const QJsonArray flat = ProPresenterClient::themesFromResponse(response);
+        QCOMPARE(flat.size(), 2);
+        // pickTheme over the flattened array still finds the vk slide that lives
+        // inside a group (previously unreachable when parsed as a bare array).
+        QCOMPARE(ProPresenterClient::pickTheme(flat).value("name").toString(),
+                 QString("VK Number"));
+    }
+
+    // A response missing both keys flattens to an empty array (no crash).
+    void themesFromResponse_emptyWhenNeitherPresent()
+    {
+        QVERIFY(ProPresenterClient::themesFromResponse(QJsonObject()).isEmpty());
     }
 
     // pickTheme returns the id-object of a slide whose name contains "vk".

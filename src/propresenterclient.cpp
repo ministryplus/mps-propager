@@ -45,11 +45,28 @@ QJsonObject ProPresenterClient::buildMessageBody(const QString &name,
     QJsonObject id{{"name", name}, {"uuid", ""}, {"index", 0}};
     QJsonObject token{{"name", kTokenName},
                       {"text", QJsonObject{{"text", number}}}};
+    // is_active is required by ProPresenter 21.x (POST/PUT reject the body with
+    // "missing field `is_active`" otherwise). The message is created/updated
+    // inactive; trigger() shows it and clear() hides it (Decision 5).
     return QJsonObject{{"id", id},
                        {"message", kMessageText},
                        {"tokens", QJsonArray{token}},
                        {"theme", theme},
-                       {"visible_on_network", true}};
+                       {"visible_on_network", true},
+                       {"is_active", false}};
+}
+
+QJsonArray ProPresenterClient::themesFromResponse(const QJsonObject &response)
+{
+    QJsonArray flat = response.value("themes").toArray();
+    for (const QJsonValue &groupVal : response.value("groups").toArray()) {
+        const QJsonArray groupThemes =
+            groupVal.toObject().value("themes").toArray();
+        for (const QJsonValue &theme : groupThemes) {
+            flat.append(theme);
+        }
+    }
+    return flat;
 }
 
 QJsonObject ProPresenterClient::pickTheme(const QJsonArray &themes)
@@ -144,9 +161,12 @@ void ProPresenterClient::createMessage()
             return;
         }
 
-        const QJsonArray themes =
-            QJsonDocument::fromJson(themesReply->readAll()).array();
-        const QJsonObject theme = pickTheme(themes);
+        // /v1/themes returns an OBJECT {"groups":[...], "themes":[...]}, so
+        // flatten it before theme selection (parsing it as an array yielded an
+        // empty list and an empty theme in the create body).
+        const QJsonObject themesResp =
+            QJsonDocument::fromJson(themesReply->readAll()).object();
+        const QJsonObject theme = pickTheme(themesFromResponse(themesResp));
         const QJsonObject body =
             buildMessageBody(kMessageName, kPlaceholderNumber, theme);
 
