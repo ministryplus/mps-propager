@@ -208,6 +208,108 @@ private slots:
         controller.enqueueNumber("m2", "777");
         QCOMPARE(controller.lastNumber(), QString("777"));
     }
+
+    // --- queuedBusy: the hourglass condition (Task 001-7) ------------------
+    //
+    // Ports bot.py's `qsize()>0 or _current_nonce or len(current_batch)>=max`
+    // check that decides whether an inbound number gets a ⌛ hourglass. It is
+    // evaluated at enqueue time, BEFORE the number joins the batch.
+
+    // First number into an idle, empty controller is NOT busy — no hourglass.
+    void queuedBusy_silentForFirstIdleEnqueue()
+    {
+        RecordingProPresenter client(m_config);
+        PagerController controller(&client, kBatchWaitMs, kBatchMax, kExpireMs);
+        controller.start();
+
+        QSignalSpy busySpy(&controller, &PagerController::queuedBusy);
+        controller.enqueueNumber("m1", "1234");
+        QCOMPARE(busySpy.count(), 0);
+    }
+
+    // A number arriving while a batch is on screen IS busy — hourglass fires.
+    void queuedBusy_firesWhileShowing()
+    {
+        RecordingProPresenter client(m_config);
+        PagerController controller(&client, kBatchWaitMs, kBatchMax, kExpireMs);
+        controller.start();
+
+        controller.enqueueNumber("m1", "111");
+        QTRY_VERIFY(controller.isShowing()); // first batch now displayed
+
+        QSignalSpy busySpy(&controller, &PagerController::queuedBusy);
+        controller.enqueueNumber("m2", "222");
+        QCOMPARE(busySpy.count(), 1);
+        QCOMPARE(busySpy.at(0).at(0).toString(), QString("m2"));
+    }
+
+    // Once the forming batch is already at batch-max, the next number is busy.
+    void queuedBusy_firesWhenCurrentBatchFull()
+    {
+        RecordingProPresenter client(m_config);
+        // Long window so the batch keeps forming and does not flush mid-test.
+        PagerController controller(&client, /*batchWaitMs=*/1000, kBatchMax,
+                                   kExpireMs);
+        controller.start();
+
+        QSignalSpy busySpy(&controller, &PagerController::queuedBusy);
+        // kBatchMax==3: the first three are not busy (sizes 0,1,2 before add);
+        // the fourth sees a full forming batch (size 3 >= max) and hourglasses.
+        controller.enqueueNumber("m1", "1");
+        controller.enqueueNumber("m2", "2");
+        controller.enqueueNumber("m3", "3");
+        QCOMPARE(busySpy.count(), 0);
+        controller.enqueueNumber("m4", "4");
+        QCOMPARE(busySpy.count(), 1);
+        QCOMPARE(busySpy.at(0).at(0).toString(), QString("m4"));
+    }
+
+    // --- cancel(): clear the on-screen message on demand (Task 001-7) ------
+
+    // cancel() while showing clears the message, signals cleared, returns Idle.
+    void cancel_clearsShowingMessage()
+    {
+        RecordingProPresenter client(m_config);
+        // Long expiry so the message would otherwise stay up: cancel must be
+        // what ends it, not the timer.
+        PagerController controller(&client, kBatchWaitMs, kBatchMax,
+                                   /*expireMs=*/5000);
+        controller.start();
+
+        controller.enqueueNumber("m1", "999");
+        QTRY_VERIFY(controller.isShowing());
+
+        QSignalSpy clearedSpy(&controller, &PagerController::cleared);
+        client.calls.clear();
+        controller.cancel();
+
+        QCOMPARE(clearedSpy.count(), 1);
+        QCOMPARE(clearedSpy.at(0).at(0).toString(), QString("m1"));
+        QVERIFY(client.calls.contains(QStringLiteral("clear")));
+        QVERIFY(!controller.isShowing());
+        QVERIFY(controller.activeFormatted().isEmpty());
+    }
+
+    // After cancel, a queued batch behind the cleared one shows automatically.
+    void cancel_advancesToNextQueuedBatch()
+    {
+        RecordingProPresenter client(m_config);
+        PagerController controller(&client, kBatchWaitMs, kBatchMax,
+                                   /*expireMs=*/5000);
+        controller.start();
+
+        // First batch shows; overflow (max 3) leaves a second batch queued.
+        controller.enqueueNumber("m1", "1");
+        controller.enqueueNumber("m2", "2");
+        controller.enqueueNumber("m3", "3");
+        controller.enqueueNumber("m4", "4");
+        QTRY_COMPARE(controller.activeFormatted(), QString("1, 2 & 3"));
+        QTRY_COMPARE(controller.queuedCount(), 1);
+
+        controller.cancel();
+        QTRY_COMPARE(controller.activeFormatted(), QString("4"));
+        QCOMPARE(controller.queuedCount(), 0);
+    }
 };
 
 QTEST_GUILESS_MAIN(TestPagerController)

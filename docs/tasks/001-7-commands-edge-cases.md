@@ -1,7 +1,7 @@
 # Task 001-7: Commands & Edge Cases
 
 **Spec:** [001 — ProPager Qt6/C++ Rewrite](../specs/001-propager-qt-rewrite.md)
-**Status:** Pending
+**Status:** Complete
 **Parallel group:** Wave 5 (parallel with [001-6](001-6-ui.md))
 **Depends on:** [001-4](001-4-pager-controller.md)
 **Blocks:** [001-8](001-8-build-pipeline.md)

@@ -63,9 +63,15 @@ public slots:
     // Ports add_to_queue: append to the current batch, arm the batch window if
     // idle, and emit queued(msgId) for feedback.
     void enqueueNumber(const QString &msgId, const QString &number);
+    // Ports bot.py's `cancel` branch (Task 001-7): clear the on-screen ProPager
+    // message immediately (per-message, Decision 5) and advance to the next
+    // queued batch, instead of waiting for the expiry timer. A no-op display
+    // change when nothing is showing (still hides the message defensively).
+    void cancel();
 
 signals:
-    void queued(const QString &msgId);   // ⌛ accepted, waiting to show
+    void queued(const QString &msgId);   // accepted, waiting to show (UI trigger)
+    void queuedBusy(const QString &msgId); // ⌛ enqueued while slot/queue busy
     void onScreen(const QString &msgId); // 📞 now displayed
     void cleared(const QString &msgId);  // 👍 display finished
 
@@ -76,7 +82,8 @@ private slots:
 private:
     enum class State { Idle, Showing };
 
-    void trySend(); // ports task_send_numbers: pop + display if Idle
+    void trySend();      // ports task_send_numbers: pop + display if Idle
+    void finishCurrent(); // clear the showing batch, signal cleared, advance
 
     ProPresenterClient *m_client;
     const int m_batchWaitMs;

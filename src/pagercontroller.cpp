@@ -71,12 +71,37 @@ void PagerController::enqueueNumber(const QString &msgId, const QString &number)
     // Ports add_to_queue: append to the accumulating batch and arm the debounce
     // window on the first number (later numbers within the window do not
     // restart it). Feedback is immediate.
+    //
+    // Ports bot.py's hourglass check (Task 001-7): evaluated BEFORE the number
+    // joins the batch, the slot is "busy" when a batch is already waiting, one
+    // is on screen, or the forming batch has hit batchMaxCount. Only then does
+    // the number earn a ⌛ (queuedBusy); an idle first number does not.
+    const bool busy = !m_queue.isEmpty() || m_state == State::Showing ||
+                      m_currentBatch.size() >= m_batchMaxCount;
+
     m_currentBatch.append({msgId, number});
     m_lastNumber = number;
     emit queued(msgId);
+    if (busy)
+        emit queuedBusy(msgId);
 
     if (!m_batchTimer->isActive())
         m_batchTimer->start(m_batchWaitMs);
+}
+
+void PagerController::cancel()
+{
+    // On-demand clear (bot.py `cancel`). If a batch is on screen, stop its
+    // expiry timer and run the same teardown the timer would have — clear the
+    // message, signal cleared, return to Idle, and pop the next batch. When
+    // nothing is showing, still hide the message defensively (bot.py always
+    // sent messageHide) without touching queue state.
+    if (m_state == State::Showing) {
+        m_expiryTimer->stop();
+        finishCurrent();
+    } else if (m_client) {
+        m_client->clear();
+    }
 }
 
 void PagerController::onBatchWindowTimeout()
@@ -126,9 +151,16 @@ void PagerController::trySend()
 
 void PagerController::onExpiryTimeout()
 {
-    // Ports the tail of pro7_send_waiter: clear the message (per-message,
-    // Decision 5), signal cleared for every source id, return to Idle, then
-    // pop the next queued batch if any.
+    // Ports the tail of pro7_send_waiter: the display duration elapsed, so tear
+    // the current batch down and advance.
+    finishCurrent();
+}
+
+void PagerController::finishCurrent()
+{
+    // Clear the message (per-message, Decision 5), signal cleared for every
+    // source id, return to Idle, then pop the next queued batch if any. Shared
+    // by the expiry timer (onExpiryTimeout) and on-demand cancel().
     if (m_client)
         m_client->clear();
 

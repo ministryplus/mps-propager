@@ -10,6 +10,7 @@
 #include <QWebSocket>
 
 class Config;
+class PagerController;
 
 // A channel the bot can see (ported from bot.py fetch_channel_list).
 struct SlackChannel
@@ -40,9 +41,40 @@ class SlackClient : public QObject
     Q_OBJECT
 
 public:
-    explicit SlackClient(const Config &config, QObject *parent = nullptr);
+    // The optional controller lets the message-grammar layer (Task 001-7)
+    // enqueue pages, cancel the on-screen message, and route emoji feedback
+    // from the controller's state signals back to Slack. Passing nullptr yields
+    // a pure Socket-Mode/Web-API client with no paging behavior (used by the
+    // envelope/response unit tests, which only call the static helpers).
+    explicit SlackClient(const Config &config,
+                         PagerController *controller = nullptr,
+                         QObject *parent = nullptr);
+
+    // The inbound-message grammar (Decision 6), ported from bot.py on_message.
+    enum class MessageAction {
+        Ignore,        // dropped: '!'-prefix, or noise with no number/command
+        Page,          // a fresh 4-digit number to forward (see `number`)
+        IgnoredNumber, // a 4-digit number listed in slack/ignore-numbers (❌)
+        Repeat,        // "repeat" with a prior number to re-send
+        RepeatNoLast,  // "repeat" with no prior number (👎)
+        Cancel         // "cancel" the on-screen message (👍)
+    };
+    struct ParsedCommand
+    {
+        MessageAction action = MessageAction::Ignore;
+        QString number; // set for Page / IgnoredNumber only
+    };
 
     // --- Pure helpers (no network; unit-tested directly) -------------------
+
+    // Classify one listen-channel message (channel filtering already applied by
+    // extractMessageEvent). Ports bot.py's on_message precedence exactly:
+    // '!'-prefix drops first; then the first 4-digit run wins (ignore-list ->
+    // IgnoredNumber, else Page); then "repeat" (case-insensitive substring;
+    // Repeat when hasLastNumber, else RepeatNoLast); then "cancel"; else Ignore.
+    static ParsedCommand parseCommand(const QString &text,
+                                      const QStringList &ignoreNumbers,
+                                      bool hasLastNumber);
 
     // Ack payload for a Socket Mode envelope. Returns {"envelope_id": "<id>"}
     // when the envelope carries an envelope_id, else an empty object (nothing
@@ -83,12 +115,22 @@ signals:
                          const QString &channel);
     void channelsListed(const QVector<SlackChannel> &channels);
 
+private slots:
+    // Applies parseCommand to an inbound listen-channel message and performs the
+    // side effects: enqueue/cancel via the controller, and immediate reactions
+    // (❌/👎/👍). Deferred feedback (⌛/📞/👍-on-clear) is driven by controller
+    // signals wired in the constructor. Connected to messageReceived.
+    void handleMessage(const QString &text, const QString &ts,
+                       const QString &channel);
+
 private:
     void openConnection();          // POST apps.connections.open
     void scheduleReconnect();       // backoff + re-run openConnection
     void onTextMessageReceived(const QString &frame);
 
     const Config &m_config;
+    PagerController *m_controller = nullptr;
+    QString m_lastNumber; // most recent forwarded number, for `repeat`
     QNetworkAccessManager m_nam;
     QWebSocket m_socket;
     QTimer m_reconnectTimer;

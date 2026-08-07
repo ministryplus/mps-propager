@@ -74,6 +74,8 @@ add_test(NAME tst_propresenterclient COMMAND tst_propresenterclient)
 qt_add_executable(tst_slackclient
     tests/tst_slackclient.cpp
     src/slackclient.cpp
+    src/pagercontroller.cpp
+    src/propresenterclient.cpp
     src/config.cpp
 )
 

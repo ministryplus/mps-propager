@@ -1,12 +1,14 @@
 #include "slackclient.h"
 
 #include "config.h"
+#include "pagercontroller.h"
 
 #include <QDebug>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QRegularExpression>
 #include <QUrl>
 
 namespace {
@@ -30,12 +32,33 @@ QNetworkRequest bearerJsonRequest(const QString &url, const QString &token)
 
 } // namespace
 
-SlackClient::SlackClient(const Config &config, QObject *parent)
-    : QObject(parent), m_config(config)
+SlackClient::SlackClient(const Config &config, PagerController *controller,
+                         QObject *parent)
+    : QObject(parent), m_config(config), m_controller(controller)
 {
     m_reconnectTimer.setSingleShot(true);
     connect(&m_reconnectTimer, &QTimer::timeout, this,
             &SlackClient::openConnection);
+
+    // Wire the message-grammar layer (Task 001-7). Inbound messages flow
+    // through handleMessage; the controller's state signals drive the deferred
+    // emoji feedback. Every page originates on the listen channel, so that is
+    // the channel every controller-driven reaction targets. This wiring lives
+    // here (not main.cpp) so Task 6 never needs to touch it.
+    connect(this, &SlackClient::messageReceived, this,
+            &SlackClient::handleMessage);
+    if (m_controller) {
+        const auto react = [this](const char *emoji, const QString &ts) {
+            addReaction(QString::fromLatin1(emoji), m_config.slackListenChannel(),
+                        ts);
+        };
+        connect(m_controller, &PagerController::queuedBusy, this,
+                [react](const QString &ts) { react("hourglass", ts); });
+        connect(m_controller, &PagerController::onScreen, this,
+                [react](const QString &ts) { react("calling", ts); });
+        connect(m_controller, &PagerController::cleared, this,
+                [react](const QString &ts) { react("thumbsup", ts); });
+    }
 
     connect(&m_socket, &QWebSocket::connected, this, [this] {
         m_backoffMs = 0; // healthy connection resets backoff
@@ -119,6 +142,40 @@ int SlackClient::nextBackoffMs(int currentMs)
     return qMin(currentMs * 2, kMaxBackoffMs);
 }
 
+SlackClient::ParsedCommand SlackClient::parseCommand(const QString &text,
+                                                     const QStringList &ignoreNumbers,
+                                                     bool hasLastNumber)
+{
+    // Ports bot.py on_message precedence exactly. '!'-prefix drops first (even
+    // when the text contains a number), then a 4-digit run wins over the
+    // repeat/cancel substrings, then repeat before cancel.
+    if (text.startsWith(QLatin1Char('!'))) {
+        return {MessageAction::Ignore, QString()};
+    }
+
+    // Ports re.search(r"(?:\d){4}"): the first run of four digits in the text.
+    static const QRegularExpression fourDigits(QStringLiteral("(?:\\d){4}"));
+    const QRegularExpressionMatch match = fourDigits.match(text);
+    if (match.hasMatch()) {
+        const QString number = match.captured(0);
+        if (ignoreNumbers.contains(number)) {
+            return {MessageAction::IgnoredNumber, number};
+        }
+        return {MessageAction::Page, number};
+    }
+
+    const QString lower = text.toLower();
+    if (lower.contains(QLatin1String("repeat"))) {
+        return {hasLastNumber ? MessageAction::Repeat
+                              : MessageAction::RepeatNoLast,
+                QString()};
+    }
+    if (lower.contains(QLatin1String("cancel"))) {
+        return {MessageAction::Cancel, QString()};
+    }
+    return {MessageAction::Ignore, QString()};
+}
+
 // --- Network methods ----------------------------------------------------
 
 void SlackClient::start()
@@ -182,6 +239,45 @@ void SlackClient::onTextMessageReceived(const QString &frame)
         emit messageReceived(msg.value("text").toString(),
                              msg.value("ts").toString(),
                              msg.value("channel").toString());
+    }
+}
+
+void SlackClient::handleMessage(const QString &text, const QString &ts,
+                                const QString &channel)
+{
+    // Ports the body of bot.py on_message. Classification is pure
+    // (parseCommand); this method performs the side effects. Deferred feedback
+    // (⌛ on busy-enqueue, 📞 on screen, 👍 on clear) is emitted by the
+    // controller's signals wired in the constructor — only the immediate
+    // reactions live here.
+    const ParsedCommand cmd =
+        parseCommand(text, m_config.slackIgnoreNumbers(), !m_lastNumber.isEmpty());
+
+    switch (cmd.action) {
+    case MessageAction::Ignore:
+        return;
+    case MessageAction::IgnoredNumber:
+        addReaction(QStringLiteral("x"), channel, ts); // ❌
+        return;
+    case MessageAction::Page:
+        m_lastNumber = cmd.number;
+        if (m_controller)
+            m_controller->enqueueNumber(ts, cmd.number);
+        return;
+    case MessageAction::Repeat:
+        // Re-send the prior number as a fresh page, keyed to THIS message's ts
+        // so its feedback lands on the "repeat" message (bot.py sender(ts)).
+        if (m_controller)
+            m_controller->enqueueNumber(ts, m_lastNumber);
+        return;
+    case MessageAction::RepeatNoLast:
+        addReaction(QStringLiteral("thumbsdown"), channel, ts); // 👎
+        return;
+    case MessageAction::Cancel:
+        if (m_controller)
+            m_controller->cancel();
+        addReaction(QStringLiteral("thumbsup"), channel, ts); // 👍
+        return;
     }
 }
 
