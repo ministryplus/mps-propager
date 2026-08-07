@@ -2,6 +2,7 @@
 #include <QDebug>
 #include <QDir>
 #include <QFile>
+#include <QLoggingCategory>
 #include <QMutex>
 #include <QTextStream>
 
@@ -61,6 +62,13 @@ int main(int argc, char *argv[])
     // so the on-disk location is correct from the very first launch.
     QCoreApplication::setOrganizationName("com.isaacwiebe");
     QCoreApplication::setApplicationName("ProPager");
+
+    // Show DEBUG+ in the Log tab and on-disk log. Uncategorized qDebug() is
+    // normally already delivered, but make it explicit so a release build or a
+    // stray QT_LOGGING_RULES can never silently drop debug lines. Scoped to the
+    // "default" (uncategorized) category so Qt-internal debug (qt.network.*, …)
+    // stays quiet — we only want the app's own qDebug() output.
+    QLoggingCategory::setFilterRules(QStringLiteral("default.debug=true"));
 
     // Create the log broker in the GUI thread up front so it has the right
     // thread affinity before the message handler (which may run early) posts.

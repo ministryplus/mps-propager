@@ -187,6 +187,7 @@ void SlackClient::openConnection()
 {
     // POST apps.connections.open (app-level token) -> wss:// URL, then open the
     // socket. This replaces the slack-bolt Socket Mode handler (Decision 8).
+    qDebug() << "[slack] POST apps.connections.open (app-level token)";
     QNetworkReply *reply = m_nam.post(
         bearerJsonRequest(kConnectionsOpen, m_config.slackAppToken()),
         QByteArray());
@@ -226,19 +227,38 @@ void SlackClient::onTextMessageReceived(const QString &frame)
     const QJsonObject envelope =
         QJsonDocument::fromJson(frame.toUtf8()).object();
 
+    const QString frameType = envelope.value("type").toString();
+    qDebug().noquote() << "[slack] frame received, type=" << frameType;
+
     // Ack first (Slack expects the ack before the event is acted on).
     const QJsonObject ack = buildAck(envelope);
     if (!ack.isEmpty()) {
         m_socket.sendTextMessage(
             QString::fromUtf8(QJsonDocument(ack).toJson(QJsonDocument::Compact)));
+        qDebug().noquote() << "[slack] acked envelope"
+                           << envelope.value("envelope_id").toString();
     }
 
-    const QJsonObject msg =
-        extractMessageEvent(envelope, m_config.slackListenChannel());
+    const QString listen = m_config.slackListenChannel();
+    const QJsonObject msg = extractMessageEvent(envelope, listen);
     if (!msg.isEmpty()) {
+        qDebug().noquote() << "[slack] message on listen channel" << listen
+                           << "text:" << msg.value("text").toString();
         emit messageReceived(msg.value("text").toString(),
                              msg.value("ts").toString(),
                              msg.value("channel").toString());
+    } else {
+        // The most common setup mistake is a wrong listen-channel or the bot not
+        // being in the channel: surface a real message event that we dropped
+        // because its channel did not match, so it is diagnosable from the log.
+        const QJsonObject event =
+            envelope.value("payload").toObject().value("event").toObject();
+        if (event.value("type").toString() == QLatin1String("message")) {
+            qDebug().noquote()
+                << "[slack] ignoring message on channel"
+                << event.value("channel").toString() << "(listening on" << listen
+                << ")";
+        }
     }
 }
 
@@ -252,6 +272,20 @@ void SlackClient::handleMessage(const QString &text, const QString &ts,
     // reactions live here.
     const ParsedCommand cmd =
         parseCommand(text, m_config.slackIgnoreNumbers(), !m_lastNumber.isEmpty());
+
+    const auto actionName = [](MessageAction a) -> const char * {
+        switch (a) {
+        case MessageAction::Ignore: return "Ignore";
+        case MessageAction::IgnoredNumber: return "IgnoredNumber";
+        case MessageAction::Page: return "Page";
+        case MessageAction::Repeat: return "Repeat";
+        case MessageAction::RepeatNoLast: return "RepeatNoLast";
+        case MessageAction::Cancel: return "Cancel";
+        }
+        return "?";
+    };
+    qDebug().noquote() << "[slack] parsed action=" << actionName(cmd.action)
+                       << "number=" << cmd.number;
 
     switch (cmd.action) {
     case MessageAction::Ignore:
