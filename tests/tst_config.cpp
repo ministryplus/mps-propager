@@ -91,6 +91,70 @@ private slots:
                  "template must not contain OAuth/simpleauth keys (Decision 3)");
     }
 
+    // Footgun 1: a trailing inline comment on a value line ("port=55184 ; ...")
+    // must not leak into the value. QSettings keeps everything after '='; the
+    // getters strip a trailing ';'/'#' comment so an uncommented template line
+    // (or a hand-annotated config) reads as the bare value.
+    void inlineComments_strippedFromValues()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString ini = dir.filePath("ProPager.ini");
+        writeIni(ini,
+                 "[slack]\n"
+                 "bot-token=xoxb-abc ; the bot token\n"
+                 "app-token=xapp-def   # the app token\n"
+                 "listen-channel=C06Q284BDRT ; Slack channel ID\n"
+                 "ignore-numbers=5555, 7777 ; not forwarded\n"
+                 "[propresenter]\n"
+                 "host=10.0.0.5 ; the box\n"
+                 "port=55184 ; PP port\n"
+                 "batch-wait-time=10 ; seconds\n"
+                 "batch-max-count=3 # max\n"
+                 "expire-time=45 ; seconds\n");
+
+        Config config(ini);
+        config.load();
+
+        QCOMPARE(config.slackBotToken(), QString("xoxb-abc"));
+        QCOMPARE(config.slackAppToken(), QString("xapp-def"));
+        QCOMPARE(config.slackListenChannel(), QString("C06Q284BDRT"));
+        QCOMPARE(config.slackIgnoreNumbers(), (QStringList{"5555", "7777"}));
+        QCOMPARE(config.propresenterHost(), QString("10.0.0.5"));
+        QCOMPARE(config.propresenterPort(), 55184);
+        QCOMPARE(config.batchWaitTime(), 10);
+        QCOMPARE(config.batchMaxCount(), 3);
+        QCOMPARE(config.expireTime(), 45);
+    }
+
+    // Footgun 2: the first-run template must not put explanatory text on the
+    // same line as a key (any line with '='), so uncommenting a key never drags
+    // a trailing comment into the value.
+    void template_keyLinesHaveNoInlineComments()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString ini = dir.filePath("ProPager.ini");
+
+        Config config(ini);
+        config.load();
+
+        QFile f(ini);
+        QVERIFY(f.open(QIODevice::ReadOnly | QIODevice::Text));
+        const QStringList lines = QString::fromUtf8(f.readAll()).split('\n');
+        f.close();
+
+        for (const QString &line : lines) {
+            const int eq = line.indexOf(QLatin1Char('='));
+            if (eq < 0)
+                continue; // section header or standalone prose comment
+            const QString afterValue = line.mid(eq + 1);
+            QVERIFY2(!afterValue.contains(QLatin1Char(';')) &&
+                         !afterValue.contains(QLatin1Char('#')),
+                     qPrintable("inline comment on key line: " + line));
+        }
+    }
+
     // An edited value survives a restart (new Config on the same path reads it
     // back) — proves load() does not clobber an existing file.
     void roundTrip_editedValuesPersist()

@@ -49,6 +49,9 @@ public:
 private:
     static QString resolveDefaultIniPath();
     void writeTemplateIfMissing() const;
+    // Read an int key, stripping any trailing inline comment; return `fallback`
+    // when the key is unset or the value isn't a valid int.
+    int intValueOr(const char *key, int fallback) const;
 
     QString m_iniPath;
     std::unique_ptr<QSettings> m_settings;
