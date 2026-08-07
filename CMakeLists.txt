@@ -19,6 +19,7 @@ qt_add_executable(ProPager
     src/main.cpp
     src/config.cpp
     src/propresenterclient.cpp
+    src/pagercontroller.cpp
     src/slackclient.cpp
 )
 
@@ -86,3 +87,20 @@ target_link_libraries(tst_slackclient PRIVATE
 )
 
 add_test(NAME tst_slackclient COMMAND tst_slackclient)
+
+qt_add_executable(tst_pagercontroller
+    tests/tst_pagercontroller.cpp
+    src/pagercontroller.cpp
+    src/propresenterclient.cpp
+    src/config.cpp
+)
+
+target_include_directories(tst_pagercontroller PRIVATE src)
+
+target_link_libraries(tst_pagercontroller PRIVATE
+    Qt6::Core
+    Qt6::Network
+    Qt6::Test
+)
+
+add_test(NAME tst_pagercontroller COMMAND tst_pagercontroller)

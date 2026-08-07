@@ -1,7 +1,7 @@
 # Task 001-4: Pager Controller (queue, batching, expiry, state)
 
 **Spec:** [001 — ProPager Qt6/C++ Rewrite](../specs/001-propager-qt-rewrite.md)
-**Status:** Pending
+**Status:** Complete
 **Parallel group:** Wave 4 (solo — integrates both clients)
 **Depends on:** [001-3](001-3-propresenter-client.md), [001-5](001-5-slack-client.md)
 **Blocks:** [001-6](001-6-ui.md), [001-7](001-7-commands-edge-cases.md)
@@ -26,15 +26,15 @@ Create the `PagerController`, the coordinating core that ports the current app's
 
 ## Acceptance Criteria
 
-- [ ] `src/pagercontroller.{h,cpp}` exist; `PagerController` is a `QObject` holding a `QQueue<Batch>`, a batch-window `QTimer`, and an expiry `QTimer`.
-- [ ] State is exactly `Idle | Showing(until T)`; no `SetUnsetEvent`, `DoubleEvent`, `_current_nonce`, or `pending{}` equivalents exist anywhere.
-- [ ] A number arriving via `enqueueNumber` starts/extends the batch window; numbers within `batch-wait-time` combine into one batch up to `batch-max-count`; overflow spills into the FIFO `QQueue`.
-- [ ] `formatBatch` returns the single number unchanged, and multiples as `"a, b & c"` (comma-join all but last, ` & ` before the last).
-- [ ] On send: `Idle`→`Showing`, ProPresenter `PUT` then `trigger` called, expiry `QTimer(expire-time)` started; on expiry: per-message `clear` called, `Showing`→`Idle`, next queued batch pops automatically.
-- [ ] Startup clears ProPager's own message before any batch is shown.
-- [ ] `queued` / `onScreen` / `cleared` signals fire per source message id, in that order.
-- [ ] UI accessors expose the current active formatted string, the queued batches, and the last number.
-- [ ] No `QThread` and no `std::thread` are created — everything runs on the Qt event loop.
+- [x] `src/pagercontroller.{h,cpp}` exist; `PagerController` is a `QObject` holding a `QQueue<Batch>`, a batch-window `QTimer`, and an expiry `QTimer`.
+- [x] State is exactly `Idle | Showing(until T)`; no `SetUnsetEvent`, `DoubleEvent`, `_current_nonce`, or `pending{}` equivalents exist anywhere.
+- [x] A number arriving via `enqueueNumber` starts/extends the batch window; numbers within `batch-wait-time` combine into one batch up to `batch-max-count`; overflow spills into the FIFO `QQueue`.
+- [x] `formatBatch` returns the single number unchanged, and multiples as `"a, b & c"` (comma-join all but last, ` & ` before the last).
+- [x] On send: `Idle`→`Showing`, ProPresenter `PUT` then `trigger` called, expiry `QTimer(expire-time)` started; on expiry: per-message `clear` called, `Showing`→`Idle`, next queued batch pops automatically.
+- [x] Startup clears ProPager's own message before any batch is shown.
+- [x] `queued` / `onScreen` / `cleared` signals fire per source message id, in that order.
+- [x] UI accessors expose the current active formatted string, the queued batches, and the last number.
+- [x] No `QThread` and no `std::thread` are created — everything runs on the Qt event loop.
 
 ## Files Changed
 

@@ -8,6 +8,8 @@
 #include <QTextStream>
 
 #include "config.h"
+#include "pagercontroller.h"
+#include "propresenterclient.h"
 
 namespace {
 
@@ -69,6 +71,19 @@ int main(int argc, char *argv[])
     installFileLogging(config.configDir());
     qInfo() << "ProPager config:" << config.configPath();
     qInfo() << "ProPager log dir:" << config.configDir();
+
+    // Wire the coordinating core (Task 001-4). The ProPresenter client owns the
+    // REST message lifecycle; the controller batches numbers and drives it on
+    // the single Qt event loop (no threads). Config stores the timings in
+    // seconds — convert to the milliseconds the QTimers expect. start() issues
+    // the startup clear (Decision 5) so launch begins from a known-empty state.
+    // The Slack layer that feeds enqueueNumber() arrives in a later wave.
+    ProPresenterClient proPresenter(config);
+    PagerController pager(&proPresenter,
+                          config.batchWaitTime() * 1000,
+                          config.batchMaxCount(),
+                          config.expireTime() * 1000);
+    pager.start();
 
     // Menu-bar / tray app: closing or hiding a window must not quit the process.
     app.setQuitOnLastWindowClosed(false);

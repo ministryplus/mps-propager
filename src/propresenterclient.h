@@ -60,15 +60,19 @@ public:
     static QString pathId(const QJsonObject &idObject);
 
 public slots:
+    // The four action slots are virtual so PagerController (Task 001-4) can be
+    // unit-driven against a recording fake client without a live ProPresenter.
+    // Overriding them changes no production behavior or public shape.
+
     // Find or create the "ProPager" message, store its id, then clear it so the
     // app launches from a known-empty state (startup recovery, Decision 5).
-    void ensureMessage();
+    virtual void ensureMessage();
     // PUT the number onto the stored message (does not show it).
-    void setNumber(const QString &number);
+    virtual void setNumber(const QString &number);
     // POST trigger: show the stored message.
-    void trigger();
+    virtual void trigger();
     // GET clear: hide only the stored message.
-    void clear();
+    virtual void clear();
 
 signals:
     void connected();
