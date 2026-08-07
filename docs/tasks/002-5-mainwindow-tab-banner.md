@@ -1,7 +1,7 @@
 # Task 002-5: MainWindow — Connections Tab, Validation Banner & Reveal Config
 
 **Spec:** [002 — Connections Tab](../specs/002-connections-tab.md)
-**Status:** Pending
+**Status:** Complete
 **Parallel group:** Wave 3 (solo — must hold the `ConnectionsTab` and edit `mainwindow.*`)
 **Depends on:** [002-1](002-1-config-api.md), [002-4](002-4-connections-tab.md)
 **Blocks:** [002-7](002-7-wiring-startup-gate.md)
@@ -90,15 +90,15 @@ that widget and adds the window-level banner.
 
 ## Acceptance Criteria
 
-- [ ] `MainWindow`'s ctor is `MainWindow(PagerController *pager, Config *config, const QString &logDir, QWidget *parent = nullptr)`; `class Config;` is forward-declared and a `Config *m_config` member is stored.
-- [ ] The `QTabWidget` shows exactly three tabs in the order **Overview / Connections / Log**; the Connections tab hosts a `ConnectionsTab` built via `buildConnectionsTab()` and held in `m_connectionsTab`.
-- [ ] A public accessor `ConnectionsTab *connectionsTab() const` exposes the tab so `main.cpp` (Task 002-7) can wire its Save/Reconnect/Test signals; `MainWindow` does not re-declare those signals itself.
-- [ ] A banner widget sits **above** the tab widget and is controlled by a public slot `void showValidation(const Config::ValidationResult &result)`.
-- [ ] With a fully-valid config the banner is **hidden** (dismissible-on-fix).
-- [ ] With a required-but-unset config the banner shows an **error-styled** message naming the missing key(s) and how to fix them; with only shape-warnings it shows a distinct **warning-styled** message and does not read as a hard blocker.
-- [ ] A **Reveal Config File** button exists on the Log tab beside the existing *Reveal Log File* button and opens `m_logDir` via `QDesktopServices::openUrl(QUrl::fromLocalFile(m_logDir))`; the Connections tab (002-4) retains the path-labeled reveal, and neither duplicates the other (documented in a comment).
-- [ ] The existing Overview/Log behavior (`setSlackConnected`, `setProPresConnected`, `refresh`, `appendLog`, `closeEvent` hide-to-tray) is unchanged.
-- [ ] The project builds; `main.cpp`'s current 3-argument `MainWindow(...)` call is the only remaining compile break, to be fixed in Task 002-7 (note this in the verification run).
+- [x] `MainWindow`'s ctor is `MainWindow(PagerController *pager, Config *config, const QString &logDir, QWidget *parent = nullptr)` and a `Config *m_config` member is stored. **Deviation:** `mainwindow.h` `#include "config.h"` rather than forward-declaring `class Config;` — the new `showValidation(const Config::ValidationResult &)` slot references the *nested* `Config::ValidationResult`, which requires the complete type; a forward declaration would not compile.
+- [x] The `QTabWidget` shows exactly three tabs in the order **Overview / Connections / Log**; the Connections tab hosts a `ConnectionsTab` built via `buildConnectionsTab()` and held in `m_connectionsTab`.
+- [x] A public accessor `ConnectionsTab *connectionsTab() const` exposes the tab so `main.cpp` (Task 002-7) can wire its Save/Reconnect/Test signals; `MainWindow` does not re-declare those signals itself.
+- [x] A banner widget sits **above** the tab widget and is controlled by a public slot `void showValidation(const Config::ValidationResult &result)`.
+- [x] With a fully-valid config the banner is **hidden** (dismissible-on-fix). *(covered by `tst_ui::banner_cleanIsHidden`)*
+- [x] With a required-but-unset config the banner shows an **error-styled** message naming the missing key(s) and how to fix them; with only shape-warnings it shows a distinct **warning-styled** message and does not read as a hard blocker. *(covered by `banner_requiredMissingIsError` / `banner_shapeWarningIsWarning` / `banner_requiredMissingPrecedesWarnings`)*
+- [x] A **Reveal Config File** button exists on the Log tab beside the existing *Reveal Log File* button and opens `m_logDir` via `QDesktopServices::openUrl(QUrl::fromLocalFile(m_logDir))`; the Connections tab (002-4) retains the path-labeled reveal, and neither duplicates the other (documented in a comment).
+- [x] The existing Overview/Log behavior (`setSlackConnected`, `setProPresConnected`, `refresh`, `appendLog`, `closeEvent` hide-to-tray) is unchanged. *(full `tst_ui` suite green)*
+- [x] The project builds; the `MainWindow(&pager, config.configDir())` call at `main.cpp:107` is the only remaining compile break, to be fixed in Task 002-7. Confirmed via a temporary `&config` probe: the app compiled and linked, then the probe was reverted.
 
 ## Files Changed
 

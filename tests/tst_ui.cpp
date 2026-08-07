@@ -3,6 +3,7 @@
 #include <QList>
 #include <QString>
 
+#include "config.h"
 #include "logbroker.h"
 #include "mainwindow.h"
 #include "pagercontroller.h"
@@ -156,6 +157,69 @@ private slots:
     {
         QCOMPARE(TrayMenu::warningTooltip(true, QString(), false, false),
                  QString("Slack and ProPresenter disconnected"));
+    }
+
+    // --- MainWindow::bannerContent (Task 002-5 validation banner) ----------
+    //
+    // The window's validation banner (Spec 002 Decision 8) is driven by a pure
+    // decision that maps a Config::ValidationResult to a tier + message, so the
+    // "dismissible-on-fix" and error-vs-warning tiering can be locked down
+    // guiless — same pattern as warningTooltip above. showValidation() only
+    // applies visibility/styling from this result.
+
+    // A fully-valid config yields no banner (dismissible-on-fix).
+    void banner_cleanIsHidden()
+    {
+        Config::ValidationResult clean;
+        const MainWindow::BannerContent c = MainWindow::bannerContent(clean);
+        QCOMPARE(c.tier, MainWindow::BannerTier::None);
+        QCOMPARE(c.message, QString());
+    }
+
+    // Required-but-unset keys produce an error-styled banner naming each one.
+    void banner_requiredMissingIsError()
+    {
+        Config::ValidationResult r;
+        r.requiredMissing.append({QStringLiteral("slack/bot_token"),
+                                  QStringLiteral("Slack bot token is required")});
+        r.requiredMissing.append(
+            {QStringLiteral("slack/listen_channel"),
+             QStringLiteral("Slack listen channel is required")});
+        const MainWindow::BannerContent c = MainWindow::bannerContent(r);
+        QCOMPARE(c.tier, MainWindow::BannerTier::Error);
+        QCOMPARE(c.message,
+                 QString("Fix these to connect:\nSlack bot token is required\n"
+                         "Slack listen channel is required"));
+    }
+
+    // Only shape-warnings produce a softer warning-styled banner.
+    void banner_shapeWarningIsWarning()
+    {
+        Config::ValidationResult r;
+        r.shapeWarnings.append(
+            {QStringLiteral("slack/bot_token"),
+             QStringLiteral("Bot token usually starts with \"xoxb-\"")});
+        const MainWindow::BannerContent c = MainWindow::bannerContent(r);
+        QCOMPARE(c.tier, MainWindow::BannerTier::Warning);
+        QCOMPARE(c.message,
+                 QString("These settings look off (still connecting):\n"
+                         "Bot token usually starts with \"xoxb-\""));
+    }
+
+    // Required-missing takes visual precedence over shape-warnings: when both
+    // exist the banner is error-styled and lists only the blockers.
+    void banner_requiredMissingPrecedesWarnings()
+    {
+        Config::ValidationResult r;
+        r.requiredMissing.append({QStringLiteral("slack/bot_token"),
+                                  QStringLiteral("Slack bot token is required")});
+        r.shapeWarnings.append(
+            {QStringLiteral("slack/listen_channel"),
+             QStringLiteral("Channel ID usually starts with \"C\"")});
+        const MainWindow::BannerContent c = MainWindow::bannerContent(r);
+        QCOMPARE(c.tier, MainWindow::BannerTier::Error);
+        QCOMPARE(c.message,
+                 QString("Fix these to connect:\nSlack bot token is required"));
     }
 };
 

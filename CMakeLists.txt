@@ -145,6 +145,7 @@ qt_add_executable(tst_ui
     tests/tst_ui.cpp
     src/ui/mainwindow.cpp
     src/ui/traymenu.cpp
+    src/ui/connectionstab.cpp
     src/pagercontroller.cpp
     src/propresenterclient.cpp
     src/logbroker.cpp
