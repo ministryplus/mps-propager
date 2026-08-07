@@ -1,7 +1,7 @@
 # Task 002-1: Config Write + Reload + Validate API
 
 **Spec:** [002 — Connections Tab](../specs/002-connections-tab.md)
-**Status:** Pending
+**Status:** Done
 **Parallel group:** Wave 1 (parallel with 002-2, 002-3 — disjoint files)
 **Depends on:** — (none)
 **Blocks:** [002-4](002-4-connections-tab.md), [002-6](002-6-tray-reconnect-warning.md), [002-7](002-7-wiring-startup-gate.md)

@@ -195,3 +195,149 @@ int Config::intValueOr(const char *key, int fallback) const
     const int n = stripInlineComment(raw.toString()).toInt(&ok);
     return ok ? n : fallback;
 }
+
+// --- Write API (Task 002-1) --------------------------------------------
+
+void Config::setSlackBotToken(const QString &value)
+{
+    m_settings->setValue(kSlackBotToken, value);
+    m_settings->sync();
+}
+
+void Config::setSlackAppToken(const QString &value)
+{
+    m_settings->setValue(kSlackAppToken, value);
+    m_settings->sync();
+}
+
+void Config::setSlackListenChannel(const QString &value)
+{
+    m_settings->setValue(kSlackListenChannel, value);
+    m_settings->sync();
+}
+
+void Config::setSlackIgnoreNumbers(const QStringList &value)
+{
+    m_settings->setValue(kSlackIgnoreNumbers, value);
+    m_settings->sync();
+}
+
+void Config::setPropresenterHost(const QString &value)
+{
+    m_settings->setValue(kPropresenterHost, value);
+    m_settings->sync();
+}
+
+void Config::setPropresenterPort(int value)
+{
+    m_settings->setValue(kPropresenterPort, value);
+    m_settings->sync();
+}
+
+void Config::setBatchWaitTime(int value)
+{
+    m_settings->setValue(kBatchWaitTime, value);
+    m_settings->sync();
+}
+
+void Config::setBatchMaxCount(int value)
+{
+    m_settings->setValue(kBatchMaxCount, value);
+    m_settings->sync();
+}
+
+void Config::setExpireTime(int value)
+{
+    m_settings->setValue(kExpireTime, value);
+    m_settings->sync();
+}
+
+void Config::reload()
+{
+    // sync() flushes any pending writes AND re-reads the backing file, so the
+    // typed getters observe the on-disk state without a new Config.
+    m_settings->sync();
+}
+
+Config::ValidationResult Config::validate() const
+{
+    ValidationResult result;
+
+    // Raw stripped value for a key, or a null QString when the key is absent.
+    // Distinguishing "absent" from "present-but-invalid" is what lets the
+    // optional-with-default keys (host/port) stay silent when unset while a
+    // present-but-malformed value still warns.
+    const auto rawStripped = [this](const char *key) -> QString {
+        const QVariant raw = m_settings->value(key);
+        if (!raw.isValid())
+            return QString();
+        return stripInlineComment(raw.toString());
+    };
+    const auto isPresent = [&](const char *key) {
+        return !rawStripped(key).isEmpty();
+    };
+
+    // Tier 1 — required-but-unset. These three block connecting.
+    if (rawStripped(kSlackBotToken).isEmpty())
+        result.requiredMissing.append(
+            {QString::fromLatin1(kSlackBotToken),
+             QStringLiteral("Slack bot token is required")});
+    if (rawStripped(kSlackAppToken).isEmpty())
+        result.requiredMissing.append(
+            {QString::fromLatin1(kSlackAppToken),
+             QStringLiteral("Slack app-level token is required")});
+    if (rawStripped(kSlackListenChannel).isEmpty())
+        result.requiredMissing.append(
+            {QString::fromLatin1(kSlackListenChannel),
+             QStringLiteral("Slack listen channel is required")});
+
+    // Tier 2 — present-but-malformed, warn-only. Absence never warns; this
+    // replaces the old silent intValueOr coercion with a visible warning
+    // while the getters keep coercing for runtime safety.
+    if (isPresent(kSlackBotToken) &&
+        !rawStripped(kSlackBotToken).startsWith(QLatin1String("xoxb-")))
+        result.shapeWarnings.append(
+            {QString::fromLatin1(kSlackBotToken),
+             QStringLiteral("Bot token usually starts with \"xoxb-\"")});
+    if (isPresent(kSlackAppToken) &&
+        !rawStripped(kSlackAppToken).startsWith(QLatin1String("xapp-")))
+        result.shapeWarnings.append(
+            {QString::fromLatin1(kSlackAppToken),
+             QStringLiteral("App-level token usually starts with \"xapp-\"")});
+    if (isPresent(kSlackListenChannel) &&
+        !rawStripped(kSlackListenChannel).startsWith(QLatin1Char('C')))
+        result.shapeWarnings.append(
+            {QString::fromLatin1(kSlackListenChannel),
+             QStringLiteral("Channel ID usually starts with \"C\"")});
+
+    // propresenter/port is optional-with-default: only a present value is
+    // checked, and it must be a valid port in 1–65535.
+    if (isPresent(kPropresenterPort)) {
+        bool ok = false;
+        const int port = rawStripped(kPropresenterPort).toInt(&ok);
+        if (!ok || port < 1 || port > 65535)
+            result.shapeWarnings.append(
+                {QString::fromLatin1(kPropresenterPort),
+                 QStringLiteral("Port must be between 1 and 65535")});
+    }
+
+    // The three timings, when present, must be positive integers.
+    const std::pair<const char *, const char *> timings[] = {
+        {kBatchWaitTime, "Batch wait time"},
+        {kBatchMaxCount, "Batch max count"},
+        {kExpireTime, "Expire time"},
+    };
+    for (const auto &[key, label] : timings) {
+        if (!isPresent(key))
+            continue;
+        bool ok = false;
+        const int n = rawStripped(key).toInt(&ok);
+        if (!ok || n <= 0)
+            result.shapeWarnings.append(
+                {QString::fromLatin1(key),
+                 QStringLiteral("%1 must be a positive whole number")
+                     .arg(QString::fromLatin1(label))});
+    }
+
+    return result;
+}

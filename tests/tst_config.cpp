@@ -233,6 +233,173 @@ private slots:
         QVERIFY2(QDir(subdir).exists(), "load() must create the config directory");
         QVERIFY(QFile::exists(ini));
     }
+
+    // --- Task 002-1: write + reload + validate ----------------------------
+
+    // Helper: does a ValidationResult carry an entry for `key` in the given
+    // tier? Tiers carry the offending key so the tab/banner/tray can render.
+    static bool hasEntry(const QList<Config::ValidationEntry> &entries,
+                         const QString &key)
+    {
+        for (const Config::ValidationEntry &e : entries)
+            if (e.key == key)
+                return true;
+        return false;
+    }
+
+    // Every setter writes through QSettings + sync(); after reload() the
+    // matching getter reads the written value back — no new Config needed.
+    void setters_roundTripThroughReload()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString ini = dir.filePath("ProPager.ini");
+
+        Config config(ini);
+        config.load();
+
+        config.setSlackBotToken("xoxb-written");
+        config.setSlackAppToken("xapp-written");
+        config.setSlackListenChannel("C0WRITTEN");
+        config.setSlackIgnoreNumbers(QStringList{"1111", "2222"});
+        config.setPropresenterHost("192.168.1.50");
+        config.setPropresenterPort(12345);
+        config.setBatchWaitTime(20);
+        config.setBatchMaxCount(7);
+        config.setExpireTime(90);
+
+        config.reload();
+
+        QCOMPARE(config.slackBotToken(), QString("xoxb-written"));
+        QCOMPARE(config.slackAppToken(), QString("xapp-written"));
+        QCOMPARE(config.slackListenChannel(), QString("C0WRITTEN"));
+        QCOMPARE(config.slackIgnoreNumbers(), (QStringList{"1111", "2222"}));
+        QCOMPARE(config.propresenterHost(), QString("192.168.1.50"));
+        QCOMPARE(config.propresenterPort(), 12345);
+        QCOMPARE(config.batchWaitTime(), 20);
+        QCOMPARE(config.batchMaxCount(), 7);
+        QCOMPARE(config.expireTime(), 90);
+    }
+
+    // Decision 2: the first in-app Save collapses the commented template to a
+    // bare key=value file (QSettings IniFormat drops comments). Accepted and
+    // expected — the .ini is now app-owned.
+    void setters_firstSaveCollapsesTemplateToBareKeys()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString ini = dir.filePath("ProPager.ini");
+
+        Config config(ini);
+        config.load(); // writes the commented template
+
+        // Sanity: the template starts life commented.
+        {
+            QFile f(ini);
+            QVERIFY(f.open(QIODevice::ReadOnly | QIODevice::Text));
+            QVERIFY(QString::fromUtf8(f.readAll()).contains(QLatin1Char(';')));
+            f.close();
+        }
+
+        config.setSlackBotToken("xoxb-collapsed");
+        config.reload();
+
+        QFile f(ini);
+        QVERIFY(f.open(QIODevice::ReadOnly | QIODevice::Text));
+        const QStringList lines = QString::fromUtf8(f.readAll()).split('\n');
+        f.close();
+
+        // The written key line is bare key=value with no leading ';'.
+        bool found = false;
+        for (const QString &line : lines) {
+            if (line.trimmed().startsWith(QLatin1String("bot-token="))) {
+                found = true;
+                QVERIFY2(!line.trimmed().startsWith(QLatin1Char(';')),
+                         "written key line must not be commented");
+                QVERIFY(line.contains(QLatin1String("xoxb-collapsed")));
+            }
+        }
+        QVERIFY2(found, "bot-token= line must be present after Save");
+        // Value round-trips through the getter.
+        QCOMPARE(config.slackBotToken(), QString("xoxb-collapsed"));
+    }
+
+    // Tier 1: the three required Slack keys are reported when unset and cleared
+    // once set; hasBlockingErrors() tracks requiredMissing.
+    void validate_flagsEachRequiredMissing()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString ini = dir.filePath("ProPager.ini");
+
+        Config config(ini);
+        config.load();
+
+        Config::ValidationResult missing = config.validate();
+        QVERIFY(hasEntry(missing.requiredMissing, "slack/bot-token"));
+        QVERIFY(hasEntry(missing.requiredMissing, "slack/app-token"));
+        QVERIFY(hasEntry(missing.requiredMissing, "slack/listen-channel"));
+        QVERIFY(missing.hasBlockingErrors());
+
+        config.setSlackBotToken("xoxb-ok");
+        config.setSlackAppToken("xapp-ok");
+        config.setSlackListenChannel("C0OK");
+        config.reload();
+
+        Config::ValidationResult set = config.validate();
+        QVERIFY(set.requiredMissing.isEmpty());
+        QVERIFY(!set.hasBlockingErrors());
+    }
+
+    // Tier 2: present-but-malformed values each raise a warn-only shape entry.
+    void validate_shapeWarningsFireForMalformed()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString ini = dir.filePath("ProPager.ini");
+
+        Config config(ini);
+        config.load();
+
+        config.setSlackBotToken("nope");    // no xoxb- prefix
+        config.setSlackAppToken("nope");    // no xapp- prefix
+        config.setSlackListenChannel("X");  // not a C… id
+        config.setPropresenterPort(70000);  // out of 1–65535
+        config.setExpireTime(-1);           // non-positive timing
+        config.reload();
+
+        Config::ValidationResult r = config.validate();
+        QVERIFY(hasEntry(r.shapeWarnings, "slack/bot-token"));
+        QVERIFY(hasEntry(r.shapeWarnings, "slack/app-token"));
+        QVERIFY(hasEntry(r.shapeWarnings, "slack/listen-channel"));
+        QVERIFY(hasEntry(r.shapeWarnings, "propresenter/port"));
+        QVERIFY(hasEntry(r.shapeWarnings, "propresenter/expire-time"));
+    }
+
+    // Valid values raise no warning; absent optional-with-default keys
+    // (host/port) must NOT warn — only present-but-invalid does. With the
+    // three required keys valid, isClean() is true.
+    void validate_silentForValidAndAbsentDefaults()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString ini = dir.filePath("ProPager.ini");
+
+        Config config(ini);
+        config.load();
+
+        // Valid required keys; host/port left UNSET (defaults apply).
+        config.setSlackBotToken("xoxb-valid");
+        config.setSlackAppToken("xapp-valid");
+        config.setSlackListenChannel("C06Q284BDRT");
+        config.reload();
+
+        Config::ValidationResult r = config.validate();
+        QVERIFY2(r.shapeWarnings.isEmpty(),
+                 "absent host/port and valid tokens must not warn");
+        QVERIFY(r.requiredMissing.isEmpty());
+        QVERIFY(r.isClean());
+    }
 };
 
 QTEST_GUILESS_MAIN(TestConfig)
