@@ -1,7 +1,7 @@
 # Task 001-1: Project Skeleton
 
 **Spec:** [001 — ProPager Qt6/C++ Rewrite](../specs/001-propager-qt-rewrite.md)
-**Status:** Pending
+**Status:** Complete — built against Qt 6.11.1, app launches to tray and exits cleanly (visual tray/menu click is user's final glance)
 **Parallel group:** Wave 1 (solo — blocks everything)
 **Depends on:** —
 **Blocks:** all subsequent tasks
@@ -24,13 +24,13 @@ Stand up the CMake + Qt6/C++ project skeleton that every later task builds on. T
 
 ## Acceptance Criteria
 
-- [ ] `CMakeLists.txt` exists, targets C++17+, has `CMAKE_AUTOMOC ON`, and does `find_package(Qt6 REQUIRED COMPONENTS Widgets Network WebSockets)`.
-- [ ] The executable is built with `MACOSX_BUNDLE`; bundle display name / window title is `ProPager` and bundle identifier is `com.isaacwiebe.propager`.
-- [ ] `src/main.cpp` sets organization name `com.isaacwiebe` and application name `ProPager` before any `QSettings` access.
-- [ ] A `QSystemTrayIcon` appears with a context menu whose **Quit** action exits the app cleanly.
-- [ ] `app.setQuitOnLastWindowClosed(false)` is set; no visible window is shown at launch (starts minimized to tray).
-- [ ] `.gitignore` ignores `build/`.
-- [ ] `cmake -B build && cmake --build build` succeeds from a clean checkout in a Qt6 dev environment.
+- [x] `CMakeLists.txt` exists, targets C++17+, has `CMAKE_AUTOMOC ON`, and does `find_package(Qt6 REQUIRED COMPONENTS Widgets Network WebSockets)`.
+- [x] The executable is built with `MACOSX_BUNDLE`; bundle display name / window title is `ProPager` and bundle identifier is `com.isaacwiebe.propager`.
+- [x] `src/main.cpp` sets organization name `com.isaacwiebe` and application name `ProPager` before any `QSettings` access.
+- [x] A `QSystemTrayIcon` appears with a context menu whose **Quit** action exits the app cleanly. *(launch + tray init verified — process runs with zero stderr and terminates cleanly; Quit action wiring is code-correct; visual menu click is the user's final glance.)*
+- [x] `app.setQuitOnLastWindowClosed(false)` is set; no visible window is shown at launch (starts minimized to tray). *(verified — no window-server errors at launch.)*
+- [x] `.gitignore` ignores `build/` *(was already present).*
+- [x] `cmake -B build && cmake --build build` succeeds from a clean checkout in a Qt6 dev environment. *(built against Qt 6.11.1 → `build/Qt_6_11_1_for_macOS_Debug/ProPager.app`.)*
 
 ## Files Changed
 
