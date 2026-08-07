@@ -1,7 +1,7 @@
 # Task 002-2: PagerController Live-Reload (behavior settings, no restart)
 
 **Spec:** [002 — Connections Tab](../specs/002-connections-tab.md)
-**Status:** Pending
+**Status:** Done
 **Parallel group:** Wave 1 (parallel with [002-1](002-1-config-api.md), [002-3](002-3-reconnect-entry-points.md) — disjoint files)
 **Depends on:** — (none)
 **Blocks:** [002-7](002-7-wiring-startup-gate.md)

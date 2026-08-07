@@ -310,6 +310,120 @@ private slots:
         QTRY_COMPARE(controller.activeFormatted(), QString("4"));
         QCOMPARE(controller.queuedCount(), 0);
     }
+
+    // --- Task 002-2: live-reload timing setters ---------------------------
+    //
+    // A behavior-field Save reloads straight into the controller (no restart,
+    // no socket churn). Each timing is read at (re)arm/slice time, so a new
+    // value applies to the NEXT cycle — an in-flight display keeps its own
+    // duration. These tests pin exactly that.
+
+    // setExpireMs while a batch is showing must NOT re-arm the expiry timer:
+    // the on-screen batch clears on its ORIGINAL (short) deadline, not the new
+    // (long) one — this is what protects a live number from a behavior Save.
+    void setExpireMs_doesNotReArmInFlightDisplay()
+    {
+        RecordingProPresenter client(m_config);
+        PagerController controller(&client, kBatchWaitMs, kBatchMax,
+                                   /*expireMs=*/400);
+        controller.start();
+
+        controller.enqueueNumber("m1", "111");
+        QTRY_VERIFY(controller.isShowing());
+
+        // Change to a much longer expiry mid-display.
+        controller.setExpireMs(5000);
+
+        // It still clears on the original ~400ms deadline — well under 2000ms
+        // and far below the new 5000ms a buggy re-arm would impose.
+        QTRY_VERIFY_WITH_TIMEOUT(!controller.isShowing(), 2000);
+    }
+
+    // A new expire-time set while idle applies to the NEXT display.
+    void setExpireMs_appliesToNextDisplay()
+    {
+        RecordingProPresenter client(m_config);
+        PagerController controller(&client, kBatchWaitMs, kBatchMax,
+                                   /*expireMs=*/5000);
+        controller.start();
+
+        // Shorten the display duration before anything shows.
+        controller.setExpireMs(80);
+
+        controller.enqueueNumber("m1", "111");
+        QTRY_VERIFY(controller.isShowing());
+
+        // Clears on the new 80ms duration, not the 5000ms it was built with.
+        QTRY_VERIFY_WITH_TIMEOUT(!controller.isShowing(), 2000);
+    }
+
+    // A new batch-wait-time arms the next batch window with the new value.
+    void setBatchWaitMs_appliesToNextWindow()
+    {
+        RecordingProPresenter client(m_config);
+        PagerController controller(&client, /*batchWaitMs=*/5000, kBatchMax,
+                                   /*expireMs=*/5000);
+        controller.start();
+
+        // Shorten the debounce window before the first number arrives.
+        controller.setBatchWaitMs(60);
+
+        controller.enqueueNumber("m1", "222");
+        QVERIFY(controller.activeFormatted().isEmpty()); // not immediate
+
+        // Shows within the new 60ms window, not the 5000ms it was built with.
+        QTRY_COMPARE_WITH_TIMEOUT(controller.activeFormatted(), QString("222"),
+                                  2000);
+    }
+
+    // A new batch-max-count slices the next ready batch at the new cap.
+    void setBatchMaxCount_appliesToNextSlice()
+    {
+        RecordingProPresenter client(m_config);
+        // Long expiry so the first sliced batch stays on screen and the
+        // overflow is stably observable in the queue.
+        PagerController controller(&client, /*batchWaitMs=*/60, kBatchMax,
+                                   /*expireMs=*/5000);
+        controller.start();
+
+        // Tighten the cap from 3 to 2 before the window fires.
+        controller.setBatchMaxCount(2);
+
+        controller.enqueueNumber("m1", "1");
+        controller.enqueueNumber("m2", "2");
+        controller.enqueueNumber("m3", "3");
+
+        // Sliced at the NEW max 2: "1 & 2" shows, "3" spills to the queue.
+        QTRY_COMPARE(controller.activeFormatted(), QString("1 & 2"));
+        QTRY_COMPARE(controller.queuedCount(), 1);
+        QCOMPARE(controller.queuedBatches().first(),
+                 (PagerController::Batch{{"m3", "3"}}));
+    }
+
+    // The setters issue no ProPresenter set/trigger/clear and do not disturb an
+    // active display — the property that lets a behavior-only Save avoid the
+    // reconnect that would wipe a live number (Decision 5/9).
+    void setters_causeNoSocketChurnOrDisplayChange()
+    {
+        RecordingProPresenter client(m_config);
+        PagerController controller(&client, kBatchWaitMs, kBatchMax,
+                                   /*expireMs=*/5000);
+        controller.start();
+
+        controller.enqueueNumber("m1", "999");
+        QTRY_VERIFY(controller.isShowing());
+        const QString shown = controller.activeFormatted();
+
+        client.calls.clear();
+        controller.setBatchWaitMs(1234);
+        controller.setBatchMaxCount(9);
+        controller.setExpireMs(6789);
+
+        // Synchronous setters: no PP calls, display untouched.
+        QVERIFY(client.calls.isEmpty());
+        QVERIFY(controller.isShowing());
+        QCOMPARE(controller.activeFormatted(), shown);
+    }
 };
 
 QTEST_GUILESS_MAIN(TestPagerController)

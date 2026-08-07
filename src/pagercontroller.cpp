@@ -44,6 +44,12 @@ QString PagerController::formatBatch(const Batch &batch)
     return numbers.join(QStringLiteral(", ")) + QStringLiteral(" & ") + last;
 }
 
+void PagerController::setBatchWaitMs(int ms) { m_batchWaitMs = ms; }
+
+void PagerController::setBatchMaxCount(int count) { m_batchMaxCount = count; }
+
+void PagerController::setExpireMs(int ms) { m_expireMs = ms; }
+
 QString PagerController::activeFormatted() const { return m_activeFormatted; }
 
 QList<PagerController::Batch> PagerController::queuedBatches() const

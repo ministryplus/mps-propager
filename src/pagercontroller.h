@@ -49,6 +49,22 @@ public:
     // (e.g. "142, 143 & 144"). Pure — unit-tested directly.
     static QString formatBatch(const Batch &batch);
 
+    // --- Live-reload setters (Spec 002 Decision 9, Task 002-2) -------------
+    // Overwrite a behavior timing in place so a Connections-tab behavior Save
+    // applies with no restart and no socket churn. Take milliseconds (Config
+    // stores seconds; the caller multiplies by 1000, matching the ctor).
+    //
+    // Each member is read at (re)arm/slice time — the batch window in
+    // enqueueNumber, the cap in onBatchWindowTimeout, the expiry in trySend —
+    // so a new value applies to the NEXT batch window / display / slice. A
+    // display already on screen keeps its original duration; these never
+    // stop, restart, or re-arm a running timer. This is what lets a
+    // behavior-only Save avoid the ProPresenter reconnect that would clear a
+    // live number (Decision 5/9).
+    void setBatchWaitMs(int ms);
+    void setBatchMaxCount(int count);
+    void setExpireMs(int ms);
+
     // --- UI accessors (replace the old DoubleEvent feedback path) ----------
     QString activeFormatted() const;    // on-screen string; empty when Idle
     QList<Batch> queuedBatches() const; // ready-but-waiting batches, FIFO order
@@ -87,9 +103,11 @@ private:
     void finishCurrent(); // clear the showing batch, signal cleared, advance
 
     ProPresenterClient *m_client;
-    const int m_batchWaitMs;
-    const int m_batchMaxCount;
-    const int m_expireMs;
+    // Non-const so the live-reload setters can overwrite them at runtime; each
+    // is read afresh at (re)arm/slice time (Task 002-2).
+    int m_batchWaitMs;
+    int m_batchMaxCount;
+    int m_expireMs;
 
     State m_state = State::Idle;
     Batch m_currentBatch;    // accumulating within the batch window
