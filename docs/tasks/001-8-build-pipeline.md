@@ -1,7 +1,7 @@
 # Task 001-8: Build, Sign & Ship Pipeline
 
 **Spec:** [001 — ProPager Qt6/C++ Rewrite](../specs/001-propager-qt-rewrite.md)
-**Status:** Pending
+**Status:** Artifacts done — signing/notarize/ship gated on operator (see below)
 **Parallel group:** Wave 6 (solo — needs the full app)
 **Depends on:** [001-6](001-6-ui.md), [001-7](001-7-commands-edge-cases.md)
 **Blocks:** —
@@ -29,17 +29,32 @@ Stand up the local build-and-ship pipeline that turns the finished Qt6/C++ app i
 
 ## Acceptance Criteria
 
-- [ ] Qt is sourced from the official Qt online installer (LGPL, universal2); Homebrew Qt is documented as forbidden for release builds.
-- [ ] `data/propager.icns` exists, rebuilt/renamed from `data/village-kids-pager.iconset`.
-- [ ] `CMakeLists.txt` sets `MACOSX_BUNDLE` metadata (display name `ProPager`, identifier `com.isaacwiebe.propager`), references the app icon, and calls `qt_generate_deploy_app_script(...)`.
-- [ ] `entitlements.plist` contains only minimal hardened-runtime entitlements — no `allow-unsigned-executable-memory`, no `disable-library-validation` (with a comment explaining why).
-- [ ] `build.sh` runs, in order: cmake configure+build (Release, universal2) → generated deploy script → inside-out codesign (nested first, `.app` last) with `--options runtime`, `--timestamp`, entitlements → `notarytool submit --wait` → `stapler staple` (`.app`) → build `.dmg` → `stapler staple` (`.dmg`), using the `com.isaacwiebe` Developer ID cert.
-- [ ] `./build.sh` produces a signed, notarized, stapled `.dmg`.
-- [ ] `spctl -a -vvv` and `codesign --verify --deep --strict` pass on the `.app`.
-- [ ] `xcrun stapler validate` passes on **both** the `.app` and the `.dmg`.
-- [ ] `lipo -archs` on the main binary shows `x86_64 arm64`.
-- [ ] The `.dmg` launches clean on a SECOND Mac with no Python and no Qt installed — mounts, app opens to a working tray icon, no Gatekeeper warning, no runtime prerequisites.
-- [ ] Python originals deleted per the Removed Files table, done LAST and only after parity is confirmed.
+- [x] Qt is sourced from the official Qt online installer (LGPL, universal2); Homebrew Qt is documented as forbidden for release builds. — `build.sh` header + README note; verified Qt at `~/src/Qt/6.11.1/macos` is `x86_64 arm64`.
+- [x] `data/propager.icns` exists, rebuilt/renamed from `data/village-kids-pager.iconset`. — reworked into `data/propager.iconset` (fixed malformed `@2x@2x` names) → `iconutil -c icns`; round-trips cleanly.
+- [x] `CMakeLists.txt` sets `MACOSX_BUNDLE` metadata (display name `ProPager`, identifier `com.isaacwiebe.propager`), references the app icon, and calls `qt_generate_deploy_app_script(...)`. — verified by a real Release universal2 configure+build+deploy.
+- [x] `entitlements.plist` contains only minimal hardened-runtime entitlements — no `allow-unsigned-executable-memory`, no `disable-library-validation` (with a comment explaining why). — `plutil -lint` OK.
+- [x] `build.sh` runs, in order: cmake configure+build (Release, universal2) → generated deploy script → inside-out codesign (nested first, `.app` last) with `--options runtime`, `--timestamp`, entitlements → `notarytool submit --wait` → `stapler staple` (`.app`) → build `.dmg` → `stapler staple` (`.dmg`), using the `com.isaacwiebe` Developer ID cert. — authored & syntax-checked; safe half (configure→build→deploy) proven end-to-end.
+- [ ] `./build.sh` produces a signed, notarized, stapled `.dmg`. — **OPERATOR:** needs the Developer ID cert + stored notary profile (neither present in dev env).
+- [ ] `spctl -a -vvv` and `codesign --verify --deep --strict` pass on the `.app`. — **OPERATOR** (needs a signed build).
+- [ ] `xcrun stapler validate` passes on **both** the `.app` and the `.dmg`. — **OPERATOR** (needs notarization).
+- [x] `lipo -archs` on the main binary shows `x86_64 arm64`. — verified on the deployed bundle.
+- [ ] The `.dmg` launches clean on a SECOND Mac with no Python and no Qt installed — mounts, app opens to a working tray icon, no Gatekeeper warning, no runtime prerequisites. — **OPERATOR** (needs a second Mac).
+- [ ] Python originals deleted per the Removed Files table, done LAST and only after parity is confirmed. — **DEFERRED:** intentionally not deleted; do this only after the operator confirms end-to-end parity on a second Mac.
+
+## Operator hand-off (steps that can't run in the dev environment)
+
+The deterministic build artifacts are authored and verified. The remaining steps
+touch secrets / external services / a second machine and are left for you:
+
+1. **Install prerequisites:** a `Developer ID Application` cert (com.isaacwiebe)
+   in the login keychain, and store a notary profile:
+   `xcrun notarytool store-credentials propager-notary --apple-id <you> --team-id <TEAMID> --password <app-specific-pw>`.
+2. **Run `./build.sh`** — produces the signed/notarized/stapled `dist/ProPager.dmg`
+   and runs the `spctl` / `codesign` / `stapler validate` / `lipo` checks itself.
+3. **Verify on a second Mac** (no Python, no Qt): mount the `.dmg`, launch, confirm
+   the tray icon works with no Gatekeeper warning.
+4. **Only after parity is confirmed**, delete the Python originals per the Removed
+   Files table (their own commit).
 
 ## Files Changed
 

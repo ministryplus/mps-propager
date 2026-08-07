@@ -14,8 +14,16 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets Network WebSockets Test)
 
 qt_standard_project_setup()
 
+# App icon (Decision 11). The .icns lives in the bundle's Resources dir and is
+# named in Info.plist via MACOSX_BUNDLE_ICON_FILE below.
+set(PROPAGER_APP_ICON "${CMAKE_CURRENT_SOURCE_DIR}/data/propager.icns")
+set_source_files_properties(${PROPAGER_APP_ICON} PROPERTIES
+    MACOSX_PACKAGE_LOCATION "Resources"
+)
+
 qt_add_executable(ProPager
     MACOSX_BUNDLE
+    ${PROPAGER_APP_ICON}
     src/main.cpp
     src/config.cpp
     src/propresenterclient.cpp
@@ -43,7 +51,25 @@ set_target_properties(ProPager PROPERTIES
     MACOSX_BUNDLE_GUI_IDENTIFIER "com.isaacwiebe.propager"
     MACOSX_BUNDLE_BUNDLE_VERSION "0.1.0"
     MACOSX_BUNDLE_SHORT_VERSION_STRING "0.1.0"
+    MACOSX_BUNDLE_ICON_FILE "propager.icns"
 )
+
+# Bundle Qt frameworks/plugins and fix rpaths into the .app on install. This is
+# the modern replacement for calling macdeployqt by hand; build.sh drives it via
+# `cmake --install`. Guarded to Apple so the ctest configure on other hosts is
+# unaffected.
+if(APPLE)
+    # Copy the built .app into the install prefix FIRST, then let the generated
+    # deploy script fix it up in place. Without the install(TARGETS) rule the
+    # prefix dir never gets created and macdeployqt fails with ENOENT.
+    install(TARGETS ProPager BUNDLE DESTINATION .)
+    qt_generate_deploy_app_script(
+        TARGET ProPager
+        OUTPUT_SCRIPT deploy_script
+        NO_UNSUPPORTED_PLATFORM_ERROR
+    )
+    install(SCRIPT ${deploy_script})
+endif()
 
 # --- Tests -----------------------------------------------------------------
 enable_testing()
