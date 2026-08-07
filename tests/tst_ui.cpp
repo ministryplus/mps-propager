@@ -6,6 +6,7 @@
 #include "logbroker.h"
 #include "mainwindow.h"
 #include "pagercontroller.h"
+#include "traymenu.h"
 
 // Unit tests for the UI's pure text-formatting logic (Task 001-6). The status
 // window and tray are driven by direct signal/slot connections and are verified
@@ -86,6 +87,75 @@ private slots:
                  QString("[ERROR] boom"));
         QCOMPARE(LogBroker::formatLine(QtInfoMsg, QStringLiteral("hi")),
                  QString("[INFO] hi"));
+    }
+
+    // --- TrayMenu::warningTooltip (Task 002-6 warning-state precedence) -----
+    //
+    // The tray's warning indicator is driven by three inputs — config validity,
+    // Slack connected, ProPresenter connected. warningTooltip() is the pure
+    // decision: it returns the reason string when the tray should warn, or an
+    // empty QString when it should show the normal state. These statics touch no
+    // widgets, matching the guiless verification of the format helpers above.
+
+    // All good → normal state (no warning).
+    void tray_allGoodIsNormal()
+    {
+        QCOMPARE(TrayMenu::warningTooltip(true, QString(), true, true),
+                 QString());
+    }
+
+    // A present-but-malformed-only result still reports configValid==true (no
+    // required key unset), so with both clients up the tray stays normal.
+    void tray_shapeWarningOnlyIsNormal()
+    {
+        QCOMPARE(TrayMenu::warningTooltip(true, QString(), true, true),
+                 QString());
+    }
+
+    // Invalid config surfaces the validation summary verbatim as the tooltip.
+    void tray_invalidConfigShowsSummary()
+    {
+        QCOMPARE(TrayMenu::warningTooltip(
+                     false, QStringLiteral("Slack bot token is required"), true,
+                     true),
+                 QString("Slack bot token is required"));
+    }
+
+    // Missing config outranks a client being down (most actionable first).
+    void tray_configPrecedesClientDown()
+    {
+        QCOMPARE(TrayMenu::warningTooltip(
+                     false, QStringLiteral("Slack bot token is required"), false,
+                     false),
+                 QString("Slack bot token is required"));
+    }
+
+    // Invalid config with no summary falls back to a generic message.
+    void tray_invalidConfigNoSummaryFallback()
+    {
+        QCOMPARE(TrayMenu::warningTooltip(false, QString(), true, true),
+                 QString("Configuration incomplete"));
+    }
+
+    // Config valid but Slack down.
+    void tray_slackDown()
+    {
+        QCOMPARE(TrayMenu::warningTooltip(true, QString(), false, true),
+                 QString("Slack disconnected"));
+    }
+
+    // Config valid but ProPresenter down.
+    void tray_proPresDown()
+    {
+        QCOMPARE(TrayMenu::warningTooltip(true, QString(), true, false),
+                 QString("ProPresenter disconnected"));
+    }
+
+    // Config valid but both clients down.
+    void tray_bothDown()
+    {
+        QCOMPARE(TrayMenu::warningTooltip(true, QString(), false, false),
+                 QString("Slack and ProPresenter disconnected"));
     }
 };
 

@@ -4,6 +4,8 @@
 #include <QObject>
 #include <QString>
 
+#include "config.h"
+
 class PagerController;
 class QAction;
 class QMenu;
@@ -25,23 +27,51 @@ class TrayMenu : public QObject
 public:
     explicit TrayMenu(PagerController *pager, QObject *parent = nullptr);
 
+    // Pure decision for the tray's warning indicator (Decision 8). Returns the
+    // reason string to show as the tooltip when the tray should warn, or an
+    // empty QString when it should show the normal state. Precedence: missing
+    // required config first (most actionable — "fill in X to connect"), else
+    // which client is down. Present-but-malformed shape warnings keep
+    // `configValid` true, so they never trip the tray (surfaced on the
+    // tab/banner instead). Static + widget-free so it is unit-tested guilessly.
+    static QString warningTooltip(bool configValid, const QString &configSummary,
+                                  bool slackConnected, bool proPresConnected);
+
 public slots:
     void setSlackConnected(bool connected);
     void setProPresConnected(bool connected);
+    // Receive the config-validation state (Task 002-1 type). Stores validity
+    // plus a human-readable summary for the tooltip, then refreshes the warning.
+    void setConfigValidation(const Config::ValidationResult &result);
     // Re-render the active-number line from the controller.
     void refreshActive();
 
 signals:
     // Emitted by the Open Window action; main.cpp shows/raises the window.
     void openWindowRequested();
+    // Emitted by the single coarse Reconnect action (Decision 12); main.cpp
+    // (Task 002-7) connects this to both clients' reconnect entry points.
+    void reconnectRequested();
 
 private:
+    // Reconcile config validity + both client-connected booleans into the
+    // tray's icon + tooltip. The single place the warning state is applied.
+    void refreshWarningState();
+
     PagerController *m_pager;
     QSystemTrayIcon *m_tray;
     QMenu *m_menu;
     QAction *m_proPresStatus;
     QAction *m_slackStatus;
     QAction *m_activeAction;
+    QAction *m_reconnectAction;
+
+    // Inputs to the warning state (step 2). Default to a clean, connected state
+    // so the tray starts normal until told otherwise.
+    bool m_configValid = true;
+    QString m_configSummary;
+    bool m_slackConnected = false;
+    bool m_proPresConnected = false;
 };
 
 #endif // PROPAGER_UI_TRAYMENU_H

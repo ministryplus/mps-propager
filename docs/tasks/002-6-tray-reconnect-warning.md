@@ -1,7 +1,7 @@
 # Task 002-6: Tray Reconnect + Warning State
 
 **Spec:** [002 — Connections Tab](../specs/002-connections-tab.md)
-**Status:** Pending
+**Status:** Complete
 **Parallel group:** Wave 2 (parallel with [002-4](002-4-connections-tab.md) — disjoint files; both consume `Config::ValidationResult` from [002-1](002-1-config-api.md))
 **Depends on:** [002-1](002-1-config-api.md)
 **Blocks:** [002-7](002-7-wiring-startup-gate.md)
