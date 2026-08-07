@@ -1,7 +1,7 @@
 # Task 001-2: Config Layer
 
 **Spec:** [001 — ProPager Qt6/C++ Rewrite](../specs/001-propager-qt-rewrite.md)
-**Status:** Pending
+**Status:** Complete — built against Qt 6.11.1; 8-case `tst_config` suite passes; first-run `.ini` + log verified on-disk under Application Support, round-trip confirmed, nothing under `~/Documents`.
 **Parallel group:** Wave 2 (solo — blocks the clients)
 **Depends on:** [001-1](001-1-project-skeleton.md)
 **Blocks:** [001-3](001-3-propresenter-client.md), [001-5](001-5-slack-client.md)
@@ -32,17 +32,17 @@ Introduce a `Config` module (`src/config.{h,cpp}`) that wraps `QSettings` in `In
 
 ## Acceptance Criteria
 
-- [ ] `src/config.h` and `src/config.cpp` exist; `Config` wraps `QSettings` in `IniFormat` + `UserScope` resolved via `QStandardPaths`.
-- [ ] Typed getters exist for all nine Decision-10 keys, each returning the documented default when the key is unset.
-- [ ] `ignore-numbers` default is `{"5555", "7777"}` and is exposed as a `QStringList`.
-- [ ] No `propresenter/password` getter/key exists (Decision 4) and no `[network]`/OAuth keys exist (Decision 3).
-- [ ] On first run the `.ini` is created at the resolved path with commented default values for every key.
-- [ ] The resolved `.ini` path is logged at startup.
-- [ ] The application log file is written under the app-support/`ProPager` directory, not `~/Documents`.
-- [ ] Nothing is written under `~/Documents`.
-- [ ] Editing a value and restarting round-trips (the edited value is read back).
-- [ ] `main.cpp` constructs `Config`, loads it, and logs the path; `CMakeLists.txt` builds `config.cpp`.
-- [ ] "Resolved path (TODO 2)" note below is filled in from a real machine.
+- [x] `src/config.h` and `src/config.cpp` exist; `Config` wraps `QSettings` in `IniFormat` resolved via `QStandardPaths` (`AppDataLocation`, inherently user-scope). *(the file-path `QSettings` ctor is used so the `.ini` lands in Application Support rather than the `~/.config` location the `IniFormat`/`UserScope` ctor produces on macOS.)*
+- [x] Typed getters exist for all nine Decision-10 keys, each returning the documented default when the key is unset. *(covered by `defaults_whenKeysUnset`.)*
+- [x] `ignore-numbers` default is `{"5555", "7777"}` and is exposed as a `QStringList`.
+- [x] No `propresenter/password` getter/key exists (Decision 4) and no `[network]`/OAuth keys exist (Decision 3). *(`firstRun_createsCommentedTemplate` asserts the template contains no `password`/`[network]`/`simpleauth`.)*
+- [x] On first run the `.ini` is created at the resolved path with commented default values for every key. *(verified on-disk + `firstRun_createsCommentedTemplate`.)*
+- [x] The resolved `.ini` path is logged at startup.
+- [x] The application log file is written under the app-support/`ProPager` directory, not `~/Documents`. *(`ProPager.log` observed alongside the `.ini`.)*
+- [x] Nothing is written under `~/Documents`. *(`~/Documents` empty before and after launch.)*
+- [x] Editing a value and restarting round-trips (the edited value is read back). *(verified on-disk: `port=61234` survived a relaunch; `roundTrip_editedValuesPersist` + `load_doesNotClobberExistingFile`.)*
+- [x] `main.cpp` constructs `Config`, loads it, and logs the path; `CMakeLists.txt` builds `config.cpp`.
+- [x] "Resolved path (TODO 2)" note below is filled in from a real machine.
 
 ## Files Changed
 
@@ -62,4 +62,4 @@ Introduce a `Config` module (`src/config.{h,cpp}`) that wraps `QSettings` in `In
 5. Confirm nothing is written under `~/Documents` (check that neither the `.ini` nor the log file lands there).
 6. Confirm the log file is created under the app-support/`ProPager` directory.
 
-**Resolved path (TODO 2):** _(fill in once observed on a real machine — expected `~/Library/Application Support/ProPager/ProPager.ini`; confirm exact filename QSettings produces for org `com.isaacwiebe` / app `ProPager`)_
+**Resolved path (TODO 2):** `~/Library/Application Support/com.isaacwiebe/ProPager/ProPager.ini` (observed on macOS 15 / Qt 6.11.1). Note the actual path includes the org segment `com.isaacwiebe/` — `QStandardPaths::AppDataLocation` for org `com.isaacwiebe` / app `ProPager` resolves to `~/Library/Application Support/com.isaacwiebe/ProPager`, one level deeper than the spec's rough `~/Library/Application Support/ProPager/` estimate. The log file (`ProPager.log`) sits in the same directory.

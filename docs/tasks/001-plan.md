@@ -69,8 +69,8 @@ Task 2).
 
 | # | File | Wave | Depends on | Blocks |
 |---|---|---|---|---|
-| 1 | [001-1-project-skeleton.md](001-1-project-skeleton.md) | 1 | — | all |
-| 2 | [001-2-config-layer.md](001-2-config-layer.md) | 2 | 1 | 3, 5 |
+| 1 | [001-1-project-skeleton.md](001-1-project-skeleton.md) ✅ | 1 | — | all |
+| 2 | [001-2-config-layer.md](001-2-config-layer.md) ✅ | 2 | 1 | 3, 5 |
 | 3 | [001-3-propresenter-client.md](001-3-propresenter-client.md) | 3 | 2 | 4 |
 | 4 | [001-4-pager-controller.md](001-4-pager-controller.md) | 4 | 3, 5 | 6, 7 |
 | 5 | [001-5-slack-client.md](001-5-slack-client.md) | 3 | 2 | 4 |

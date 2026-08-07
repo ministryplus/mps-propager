@@ -9,14 +9,15 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
 # Network + WebSockets are declared now so later waves (ProPresenter REST,
-# Slack Socket Mode) need no build-file changes.
-find_package(Qt6 REQUIRED COMPONENTS Widgets Network WebSockets)
+# Slack Socket Mode) need no build-file changes. Test drives the unit tests.
+find_package(Qt6 REQUIRED COMPONENTS Widgets Network WebSockets Test)
 
 qt_standard_project_setup()
 
 qt_add_executable(ProPager
     MACOSX_BUNDLE
     src/main.cpp
+    src/config.cpp
 )
 
 target_link_libraries(ProPager PRIVATE
@@ -33,3 +34,20 @@ set_target_properties(ProPager PROPERTIES
     MACOSX_BUNDLE_BUNDLE_VERSION "0.1.0"
     MACOSX_BUNDLE_SHORT_VERSION_STRING "0.1.0"
 )
+
+# --- Tests -----------------------------------------------------------------
+enable_testing()
+
+qt_add_executable(tst_config
+    tests/tst_config.cpp
+    src/config.cpp
+)
+
+target_include_directories(tst_config PRIVATE src)
+
+target_link_libraries(tst_config PRIVATE
+    Qt6::Core
+    Qt6::Test
+)
+
+add_test(NAME tst_config COMMAND tst_config)
