@@ -1,7 +1,7 @@
 # Task 002-4: Connections Tab (per-connection form widget)
 
 **Spec:** [002 — Connections Tab](../specs/002-connections-tab.md)
-**Status:** Pending
+**Status:** Complete
 **Parallel group:** Wave 2 (parallel with [002-6](002-6-tray-reconnect-warning.md) — disjoint files; both consume `Config::ValidationResult` from 002-1)
 **Depends on:** [002-1](002-1-config-api.md)
 **Blocks:** [002-5](002-5-mainwindow-tab-banner.md), [002-7](002-7-wiring-startup-gate.md)

@@ -32,6 +32,7 @@ qt_add_executable(ProPager
     src/logbroker.cpp
     src/ui/mainwindow.cpp
     src/ui/traymenu.cpp
+    src/ui/connectionstab.cpp
 )
 
 # main.cpp and the UI sources include headers by "config.h" / "pagercontroller.h"
@@ -159,3 +160,24 @@ target_link_libraries(tst_ui PRIVATE
 )
 
 add_test(NAME tst_ui COMMAND tst_ui)
+
+qt_add_executable(tst_connectionstab
+    tests/tst_connectionstab.cpp
+    src/ui/connectionstab.cpp
+    src/config.cpp
+)
+
+target_include_directories(tst_connectionstab PRIVATE src src/ui)
+
+target_link_libraries(tst_connectionstab PRIVATE
+    Qt6::Widgets
+    Qt6::Test
+)
+
+add_test(NAME tst_connectionstab COMMAND tst_connectionstab)
+
+# ConnectionsTab is a real QWidget, so its test needs a QApplication; run it
+# under the offscreen platform so the suite stays headless (no display).
+set_tests_properties(tst_connectionstab PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+)
