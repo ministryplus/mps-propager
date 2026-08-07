@@ -1,37 +1,84 @@
 #include "mainwindow.h"
 
 #include <QCloseEvent>
+#include <QDesktopServices>
+#include <QHBoxLayout>
 #include <QLabel>
-#include <QMessageBox>
+#include <QPlainTextEdit>
+#include <QPushButton>
 #include <QStatusBar>
+#include <QTabWidget>
+#include <QUrl>
 #include <QVBoxLayout>
 #include <QWidget>
 
-MainWindow::MainWindow(PagerController *pager, QWidget *parent)
-    : QMainWindow(parent), m_pager(pager)
+namespace {
+// Cap the in-window log so a long service cannot grow it without bound; the full
+// history still lives in the on-disk ProPager.log.
+constexpr int kMaxLogBlocks = 5000;
+} // namespace
+
+MainWindow::MainWindow(PagerController *pager, const QString &logDir,
+                       QWidget *parent)
+    : QMainWindow(parent), m_pager(pager), m_logDir(logDir)
 {
     setWindowTitle(QStringLiteral("ProPager")); // was "Village Kids Pager"
-    resize(300, 200);
+    resize(360, 260);
 
-    auto *central = new QWidget(this);
-    auto *layout = new QVBoxLayout(central);
-
-    m_activeLabel = new QLabel(QStringLiteral("Active Number: N/A"), central);
-    m_activeLabel->setAlignment(Qt::AlignLeading);
-    layout->addWidget(m_activeLabel);
-
-    m_queueLabel = new QLabel(QStringLiteral("Numbers Queued:"), central);
-    m_queueLabel->setAlignment(Qt::AlignLeading);
-    layout->addWidget(m_queueLabel);
-
-    layout->addStretch();
-    setCentralWidget(central);
+    auto *tabs = new QTabWidget(this);
+    tabs->addTab(buildOverviewTab(), QStringLiteral("Overview"));
+    tabs->addTab(buildLogTab(), QStringLiteral("Log"));
+    setCentralWidget(tabs);
 
     // Two permanent status-bar widgets (ports Status in overview.py).
     m_slackStatus = new QLabel(QStringLiteral("Slack: Disconnected"), this);
     m_proPresStatus = new QLabel(QStringLiteral("ProPres: Disconnected"), this);
     statusBar()->addPermanentWidget(m_slackStatus);
     statusBar()->addPermanentWidget(m_proPresStatus);
+}
+
+QWidget *MainWindow::buildOverviewTab()
+{
+    auto *tab = new QWidget(this);
+    auto *layout = new QVBoxLayout(tab);
+
+    m_activeLabel = new QLabel(QStringLiteral("Active Number: N/A"), tab);
+    m_activeLabel->setAlignment(Qt::AlignLeading);
+    layout->addWidget(m_activeLabel);
+
+    m_queueLabel = new QLabel(QStringLiteral("Numbers Queued:"), tab);
+    m_queueLabel->setAlignment(Qt::AlignLeading);
+    layout->addWidget(m_queueLabel);
+
+    layout->addStretch();
+    return tab;
+}
+
+QWidget *MainWindow::buildLogTab()
+{
+    auto *tab = new QWidget(this);
+    auto *layout = new QVBoxLayout(tab);
+
+    m_logView = new QPlainTextEdit(tab);
+    m_logView->setReadOnly(true);
+    m_logView->setMaximumBlockCount(kMaxLogBlocks);
+    m_logView->setLineWrapMode(QPlainTextEdit::NoWrap);
+    layout->addWidget(m_logView);
+
+    auto *buttons = new QHBoxLayout;
+    auto *reveal = new QPushButton(QStringLiteral("Reveal Log File"), tab);
+    connect(reveal, &QPushButton::clicked, this, [this] {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(m_logDir));
+    });
+    auto *clear = new QPushButton(QStringLiteral("Clear"), tab);
+    connect(clear, &QPushButton::clicked, m_logView, &QPlainTextEdit::clear);
+
+    buttons->addWidget(reveal);
+    buttons->addWidget(clear);
+    buttons->addStretch();
+    layout->addLayout(buttons);
+
+    return tab;
 }
 
 QString MainWindow::formatActiveLine(const QString &lastNumber,
@@ -95,11 +142,10 @@ void MainWindow::refresh()
     m_queueLabel->setText(formatQueue(batches));
 }
 
-void MainWindow::showSetupError(const QString &message)
+void MainWindow::appendLog(const QString &line)
 {
-    QMessageBox box(QMessageBox::Critical, QStringLiteral("Error!"), message,
-                    QMessageBox::Ok, this);
-    box.exec();
+    // appendPlainText keeps the view scrolled to the newest entry.
+    m_logView->appendPlainText(line);
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)

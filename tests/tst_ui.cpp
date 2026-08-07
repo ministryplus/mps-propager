@@ -3,6 +3,7 @@
 #include <QList>
 #include <QString>
 
+#include "logbroker.h"
 #include "mainwindow.h"
 #include "pagercontroller.h"
 
@@ -70,6 +71,21 @@ private slots:
             PagerController::Batch{{"m3", "3"}}};
         QCOMPARE(MainWindow::formatQueue(batches),
                  QString("Numbers Queued:\n1 & 2\n3"));
+    }
+
+    // --- LogBroker::formatLine (feeds the in-window Log tab) ---------------
+
+    // Warnings/criticals map to the WARN/ERROR levels the Log tab shows so a
+    // ProPresenter/Slack failure reads as actionable text, not a dead modal.
+    void logLine_levelPrefixes()
+    {
+        QCOMPARE(LogBroker::formatLine(QtWarningMsg,
+                                       QStringLiteral("[slack] disconnected")),
+                 QString("[WARN] [slack] disconnected"));
+        QCOMPARE(LogBroker::formatLine(QtCriticalMsg, QStringLiteral("boom")),
+                 QString("[ERROR] boom"));
+        QCOMPARE(LogBroker::formatLine(QtInfoMsg, QStringLiteral("hi")),
+                 QString("[INFO] hi"));
     }
 };
 

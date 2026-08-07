@@ -21,6 +21,7 @@ qt_add_executable(ProPager
     src/propresenterclient.cpp
     src/pagercontroller.cpp
     src/slackclient.cpp
+    src/logbroker.cpp
     src/ui/mainwindow.cpp
     src/ui/traymenu.cpp
 )
@@ -118,6 +119,7 @@ qt_add_executable(tst_ui
     src/ui/mainwindow.cpp
     src/pagercontroller.cpp
     src/propresenterclient.cpp
+    src/logbroker.cpp
     src/config.cpp
 )
 

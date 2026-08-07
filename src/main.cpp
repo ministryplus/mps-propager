@@ -1,10 +1,12 @@
 #include <QApplication>
+#include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QMutex>
 #include <QTextStream>
 
 #include "config.h"
+#include "logbroker.h"
 #include "pagercontroller.h"
 #include "propresenterclient.h"
 #include "slackclient.h"
@@ -23,16 +25,7 @@ void messageHandler(QtMsgType type, const QMessageLogContext &, const QString &m
 {
     QMutexLocker locker(&g_logMutex);
 
-    const char *level = "INFO";
-    switch (type) {
-    case QtDebugMsg: level = "DEBUG"; break;
-    case QtInfoMsg: level = "INFO"; break;
-    case QtWarningMsg: level = "WARN"; break;
-    case QtCriticalMsg: level = "ERROR"; break;
-    case QtFatalMsg: level = "FATAL"; break;
-    }
-
-    const QString line = QStringLiteral("[%1] %2").arg(level, msg);
+    const QString line = LogBroker::formatLine(type, msg);
 
     // Always echo to stderr so a dev launch still shows output.
     QTextStream(stderr) << line << '\n';
@@ -41,6 +34,11 @@ void messageHandler(QtMsgType type, const QMessageLogContext &, const QString &m
         QTextStream(g_logFile) << line << '\n';
         g_logFile->flush();
     }
+
+    // Fan the same line out to the in-window Log tab. Receivers use a queued
+    // connection, so this is safe even if a message ever arrives off the GUI
+    // thread.
+    LogBroker::instance()->post(line);
 }
 
 // Open the log file under the config directory, creating the directory if
@@ -63,6 +61,10 @@ int main(int argc, char *argv[])
     // so the on-disk location is correct from the very first launch.
     QCoreApplication::setOrganizationName("com.isaacwiebe");
     QCoreApplication::setApplicationName("ProPager");
+
+    // Create the log broker in the GUI thread up front so it has the right
+    // thread affinity before the message handler (which may run early) posts.
+    LogBroker::instance();
 
     // Load configuration and route logging into the same app-support/ProPager
     // directory as the .ini (Decision 10/11, closes Open TODO 2).
@@ -94,8 +96,13 @@ int main(int argc, char *argv[])
 
     // UI (Task 001-6). Both surfaces update by direct signal/slot connections
     // (Decision 7) — there is no polling thread.
-    MainWindow window(&pager);
+    MainWindow window(&pager, config.configDir());
     TrayMenu tray(&pager);
+
+    // Stream the app's error/access log into the window's Log tab. Queued so
+    // delivery always lands on the GUI thread.
+    QObject::connect(LogBroker::instance(), &LogBroker::appended, &window,
+                     &MainWindow::appendLog, Qt::QueuedConnection);
 
     // Connection state -> status labels/actions on both surfaces.
     QObject::connect(&slack, &SlackClient::connected, &window,
@@ -130,15 +137,17 @@ int main(int argc, char *argv[])
         window.activateWindow();
     });
 
-    // Fatal config/connection errors surface as a modal (mainwindow.py parity).
-    // NOTE (Task 6 open item): both clients also emit error() for transient
-    // failures (reconnect backoff, a failed reactions.add). Routing every one
-    // to the modal can spam during a network blip; distinguishing transient
-    // from fatal needs a separate client-side signal and is left as a follow-up.
-    QObject::connect(&slack, &SlackClient::error, &window,
-                     &MainWindow::showSetupError);
-    QObject::connect(&proPresenter, &ProPresenterClient::error, &window,
-                     &MainWindow::showSetupError);
+    // Client errors go to the log, not a modal. A QMessageBox spins a nested
+    // event loop, so a burst of error() signals (reconnect backoff, failed
+    // reactions.add, timed-out requests) stacked modals and could wedge the UI.
+    // Routing them through qWarning() surfaces them in the Log tab (and the
+    // on-disk log) as actionable text, non-blocking.
+    const auto logClientError = [](const QString &message) {
+        qWarning().noquote() << message;
+    };
+    QObject::connect(&slack, &SlackClient::error, &app, logClientError);
+    QObject::connect(&proPresenter, &ProPresenterClient::error, &app,
+                     logClientError);
 
     // Startup clear (Decision 5), then connect to Slack. The app starts in the
     // tray; the window is shown on demand via Open Window.
