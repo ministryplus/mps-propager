@@ -4,6 +4,7 @@
 #include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QObject>
+#include <QPointer>
 #include <QString>
 #include <QTimer>
 #include <QVector>
@@ -11,6 +12,7 @@
 
 class Config;
 class PagerController;
+class QNetworkReply;
 
 // A channel the bot can see (ported from bot.py fetch_channel_list).
 struct SlackChannel
@@ -101,6 +103,14 @@ public:
 public slots:
     // Begin the handshake: POST apps.connections.open, then open the socket.
     void start();
+    // Manual "kick it now" (Task 002-3): cancel any pending backoff, reset it
+    // to zero, and re-run openConnection() immediately — skipping the
+    // exponential wait scheduleReconnect() accumulates. Safe to call while
+    // already connected: the existing socket (and any pending handshake reply)
+    // is torn down first, so exactly one QWebSocket remains and no reply leaks.
+    // Reads m_config (tokens, channel) live. The automatic-backoff path is
+    // unchanged; this is purely an additional entry point.
+    void reconnectNow();
     // POST reactions.add for the feedback layer (bot token).
     void addReaction(const QString &emoji, const QString &channel,
                      const QString &ts);
@@ -135,6 +145,13 @@ private:
     QWebSocket m_socket;
     QTimer m_reconnectTimer;
     int m_backoffMs = 0;
+    // In-flight apps.connections.open reply, tracked so reconnectNow() can
+    // abort a pending handshake instead of leaking it.
+    QPointer<QNetworkReply> m_openReply;
+    // Set while reconnectNow() intentionally closes a healthy socket, so the
+    // disconnected handler suppresses the automatic backoff reschedule for
+    // that one close (reconnectNow drives the reopen itself).
+    bool m_manualClose = false;
 };
 
 #endif // PROPAGER_SLACKCLIENT_H

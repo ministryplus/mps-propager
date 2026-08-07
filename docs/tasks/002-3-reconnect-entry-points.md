@@ -1,7 +1,7 @@
 # Task 002-3: Reconnect Entry Points (ProPresenter + Slack)
 
 **Spec:** [002 — Connections Tab](../specs/002-connections-tab.md)
-**Status:** Pending
+**Status:** Done
 **Parallel group:** Wave 1 (parallel with 002-1, 002-2 — disjoint files, both clients owned here)
 **Depends on:** —
 **Blocks:** [002-7](002-7-wiring-startup-gate.md)

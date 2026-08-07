@@ -5,9 +5,11 @@
 #include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QObject>
+#include <QPointer>
 #include <QString>
 
 class Config;
+class QNetworkReply;
 
 // ProPresenterClient owns ProPager's ProPresenter message lifecycle over the
 // documented REST /v1 API (Spec 001, Decisions 4 & 5). It uses
@@ -67,6 +69,18 @@ public:
     // Path identifier for {id}: prefer the uuid, fall back to the name.
     static QString pathId(const QJsonObject &idObject);
 
+    // Outcome of test() (Task 002-3, Decision 10). Reachability + adopt/create
+    // readiness only — NOT the deep #2 preflight. The struct is the seam #2's
+    // preflight extends: add slide-label / message-shape fields here later
+    // without reshaping the tested() signal or its call sites.
+    struct TestResult
+    {
+        bool reachable = false;    // the REST API answered at apiBase()
+        bool messageReady = false; // the ProPager message can be adopted/created
+        QString detail;            // human-readable outcome for the tab/log
+        // --- #2 extension seam (slide-label / message-shape checks) --------
+    };
+
 public slots:
     // The four action slots are virtual so PagerController (Task 001-4) can be
     // unit-driven against a recording fake client without a live ProPresenter.
@@ -82,10 +96,25 @@ public slots:
     // GET clear: hide only the stored message.
     virtual void clear();
 
+    // Re-run the connect/ensure path from current Config (Task 002-3): discard
+    // any stale resolved id (host may have changed) and re-resolve via
+    // ensureMessage(). Safe to call while already connected — a prior in-flight
+    // ensure is aborted, so no reply leaks and m_messageId is not
+    // double-resolved. FOOTGUN (Decision 5): ensureMessage() issues the startup
+    // clear on ProPager's own message, so 002-7 gates PP reconnect on dirty
+    // connection fields. This method only provides the re-runnable entry point.
+    void reconnect();
+
+    // Reachability check (Task 002-3, Decision 10): confirm the REST API is
+    // reachable and the ProPager message can be adopted or created, reporting
+    // via tested(TestResult). Drives NO set/trigger/clear — reachability only.
+    void test();
+
 signals:
     void connected();
     void disconnected();
     void error(const QString &message);
+    void tested(const TestResult &result);
 
 private:
     QString apiBase() const;
@@ -95,6 +124,10 @@ private:
     const Config &m_config;
     QNetworkAccessManager m_nam;
     QJsonObject m_messageId; // id-object of the ProPager message, once resolved
+    // In-flight GET /v1/messages from ensureMessage(), tracked so a reconnect()
+    // re-entry can abort it (no leaked reply, no double-resolve). Cleared when
+    // the reply finishes or is aborted.
+    QPointer<QNetworkReply> m_ensureReply;
 };
 
 #endif // PROPAGER_PROPRESENTERCLIENT_H

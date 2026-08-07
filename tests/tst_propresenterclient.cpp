@@ -3,7 +3,9 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QString>
+#include <QTemporaryDir>
 
+#include "config.h"
 #include "propresenterclient.h"
 
 // Unit tests for ProPresenterClient's pure request/response logic (Task 001-3).
@@ -172,6 +174,73 @@ private slots:
         QCOMPARE(ProPresenterClient::pathId(
                      QJsonObject{{"uuid", ""}, {"name", "ProPager"}}),
                  QString("ProPager"));
+    }
+
+    // --- Task 002-3: reconnect() + test() (offline-safe paths) ------------
+    //
+    // The reachable/connected paths need a live ProPresenter and are verified
+    // manually (see the task). These two exercise the deterministic
+    // unreachable path against a refused local port: no live service, no flake.
+
+    // Point a Config's ProPresenter at a dead local port so the REST GET is
+    // refused immediately (connection refused), not hung. Config owns a
+    // unique_ptr (non-copyable), so configure it in place by reference.
+    static void configureDeadEndpoint(Config &config)
+    {
+        config.load();
+        config.setPropresenterPort(65500); // nothing listens here (host: default)
+        config.reload();
+    }
+
+    // test() against an unreachable endpoint reports reachable=false with a
+    // useful detail string, and drives no set/trigger/clear.
+    void test_reportsUnreachableForDeadEndpoint()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        Config config(dir.filePath("ProPager.ini"));
+        configureDeadEndpoint(config);
+        ProPresenterClient client(config);
+
+        ProPresenterClient::TestResult captured;
+        bool got = false;
+        connect(&client, &ProPresenterClient::tested, &client,
+                [&](const ProPresenterClient::TestResult &r) {
+                    captured = r;
+                    got = true;
+                });
+
+        client.test();
+
+        QTRY_VERIFY_WITH_TIMEOUT(got, 3000);
+        QVERIFY(!captured.reachable);
+        QVERIFY(!captured.messageReady);
+        QVERIFY2(!captured.detail.isEmpty(),
+                 "unreachable result must carry a diagnostic detail");
+    }
+
+    // reconnect() is safe to call repeatedly while a prior ensure is still in
+    // flight: the first reply is aborted (not leaked, no double-resolve) and
+    // the app does not crash. Against a dead port the surviving attempt fails
+    // and emits disconnected exactly once.
+    void reconnect_safeWhenCalledRepeatedly()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        Config config(dir.filePath("ProPager.ini"));
+        configureDeadEndpoint(config);
+        ProPresenterClient client(config);
+
+        int disconnects = 0;
+        connect(&client, &ProPresenterClient::disconnected, &client,
+                [&] { ++disconnects; });
+
+        client.reconnect();
+        client.reconnect(); // immediate re-entry: must abort the first cleanly
+
+        QTRY_VERIFY_WITH_TIMEOUT(disconnects >= 1, 3000);
+        // The aborted first attempt must not itself report a disconnect.
+        QCOMPARE(disconnects, 1);
     }
 };
 

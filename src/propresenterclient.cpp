@@ -126,10 +126,27 @@ QString ProPresenterClient::messagePath() const
 
 void ProPresenterClient::ensureMessage()
 {
+    // Safe-while-connected (Task 002-3): abort any in-flight ensure first so a
+    // re-entry (reconnect) cannot leak the previous reply or double-resolve
+    // m_messageId. Clear the tracking pointer BEFORE aborting so the aborted
+    // reply's own finished handler no-ops instead of racing this one.
+    if (m_ensureReply) {
+        QNetworkReply *stale = m_ensureReply;
+        m_ensureReply = nullptr;
+        stale->abort();
+    }
+
     QNetworkReply *reply = m_nam.get(jsonRequest(apiBase() + "/v1/messages"));
+    m_ensureReply = reply;
     connect(reply, &QNetworkReply::finished, this, [this, reply] {
+        if (m_ensureReply == reply)
+            m_ensureReply = nullptr;
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
+            // A deliberate abort from a reconnect() re-entry is not a failure:
+            // the superseding ensure reports its own outcome.
+            if (reply->error() == QNetworkReply::OperationCanceledError)
+                return;
             emit error(QStringLiteral("Failed to reach ProPresenter: %1")
                            .arg(reply->errorString()));
             emit disconnected();
@@ -146,6 +163,66 @@ void ProPresenterClient::ensureMessage()
         } else {
             clear(); // startup recovery: known-empty state
         }
+    });
+}
+
+void ProPresenterClient::reconnect()
+{
+    // Re-run the connect/ensure path from current Config. Discard any stale
+    // resolved id — the host may have changed, so the old message record is not
+    // reused; ensureMessage() re-resolves (find-or-create) it. ensureMessage()
+    // aborts any in-flight ensure, so a rapid double reconnect() is safe.
+    m_messageId = QJsonObject();
+    ensureMessage();
+}
+
+void ProPresenterClient::test()
+{
+    // Reachability + adopt/create readiness only (Decision 10): GET the message
+    // list; if the ProPager message exists it is adoptable, otherwise confirm a
+    // theme exists so it could be created. Never set/trigger/clear. The result
+    // is reported via tested() so the async REST call does not block.
+    QNetworkReply *reply = m_nam.get(jsonRequest(apiBase() + "/v1/messages"));
+    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit tested({/*reachable=*/false, /*messageReady=*/false,
+                         QStringLiteral("Cannot reach ProPresenter at %1: %2")
+                             .arg(apiBase(), reply->errorString())});
+            return;
+        }
+
+        const QJsonArray messages =
+            QJsonDocument::fromJson(reply->readAll()).array();
+        if (!findMessageId(messages, kMessageName).isEmpty()) {
+            emit tested({true, true,
+                         QStringLiteral("Reachable; ProPager message found")});
+            return;
+        }
+
+        // Not present yet — confirm it could be created (a theme is available)
+        // without actually creating it.
+        QNetworkReply *themesReply =
+            m_nam.get(jsonRequest(apiBase() + "/v1/themes"));
+        connect(themesReply, &QNetworkReply::finished, this, [this, themesReply] {
+            themesReply->deleteLater();
+            if (themesReply->error() != QNetworkReply::NoError) {
+                emit tested({true, false,
+                             QStringLiteral("Reachable, but themes unavailable: %1")
+                                 .arg(themesReply->errorString())});
+                return;
+            }
+            const QJsonObject themesResp =
+                QJsonDocument::fromJson(themesReply->readAll()).object();
+            const bool creatable =
+                !pickTheme(themesFromResponse(themesResp)).isEmpty();
+            emit tested(
+                {true, creatable,
+                 creatable
+                     ? QStringLiteral(
+                           "Reachable; ProPager message will be created")
+                     : QStringLiteral("Reachable, but no usable theme found")});
+        });
     });
 }
 

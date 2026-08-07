@@ -68,6 +68,13 @@ SlackClient::SlackClient(const Config &config, PagerController *controller,
     connect(&m_socket, &QWebSocket::disconnected, this, [this] {
         qWarning() << "[slack] Socket Mode disconnected";
         emit disconnected();
+        // A close driven by reconnectNow() must not also arm the auto-backoff:
+        // reconnectNow reopens immediately, and a stray timer would open a
+        // second socket. Consume the flag and skip the reschedule once.
+        if (m_manualClose) {
+            m_manualClose = false;
+            return;
+        }
         scheduleReconnect();
     });
     connect(&m_socket, &QWebSocket::textMessageReceived, this,
@@ -183,6 +190,32 @@ void SlackClient::start()
     openConnection();
 }
 
+void SlackClient::reconnectNow()
+{
+    // Cancel any pending backoff and reset it, so the reconnect happens now
+    // rather than after the accumulated exponential wait.
+    m_reconnectTimer.stop();
+    m_backoffMs = 0;
+
+    // Safe-while-connected: tear down an existing/connecting socket so exactly
+    // one QWebSocket remains after the reopen. Suppress the auto-backoff for
+    // this intentional close (openConnection below drives the reopen).
+    if (m_socket.state() != QAbstractSocket::UnconnectedState) {
+        m_manualClose = true;
+        m_socket.close();
+    }
+    // Abort a pending handshake reply so it is not leaked and cannot open a
+    // second socket when it returns.
+    if (m_openReply) {
+        QNetworkReply *stale = m_openReply;
+        m_openReply = nullptr;
+        stale->abort();
+    }
+
+    qInfo() << "[slack] manual reconnect: reopening now (backoff reset)";
+    openConnection();
+}
+
 void SlackClient::openConnection()
 {
     // POST apps.connections.open (app-level token) -> wss:// URL, then open the
@@ -191,9 +224,16 @@ void SlackClient::openConnection()
     QNetworkReply *reply = m_nam.post(
         bearerJsonRequest(kConnectionsOpen, m_config.slackAppToken()),
         QByteArray());
+    m_openReply = reply;
     connect(reply, &QNetworkReply::finished, this, [this, reply] {
+        if (m_openReply == reply)
+            m_openReply = nullptr;
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
+            // A deliberate abort from reconnectNow() is not a failure: the
+            // superseding openConnection() reports its own outcome.
+            if (reply->error() == QNetworkReply::OperationCanceledError)
+                return;
             emit error(QStringLiteral("apps.connections.open failed: %1")
                            .arg(reply->errorString()));
             scheduleReconnect();
