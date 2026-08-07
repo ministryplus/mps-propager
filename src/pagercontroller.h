@@ -52,6 +52,7 @@ public:
     // --- UI accessors (replace the old DoubleEvent feedback path) ----------
     QString activeFormatted() const;    // on-screen string; empty when Idle
     QList<Batch> queuedBatches() const; // ready-but-waiting batches, FIFO order
+    Batch currentBatch() const;         // the still-forming batch (pre-window)
     int queuedCount() const;            // number of waiting batches
     QString lastNumber() const;         // most recently enqueued number
     bool isShowing() const;             // true while a batch is displayed

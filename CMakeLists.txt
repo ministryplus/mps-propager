@@ -21,7 +21,13 @@ qt_add_executable(ProPager
     src/propresenterclient.cpp
     src/pagercontroller.cpp
     src/slackclient.cpp
+    src/ui/mainwindow.cpp
+    src/ui/traymenu.cpp
 )
+
+# main.cpp and the UI sources include headers by "config.h" / "pagercontroller.h"
+# etc.; put src on the include path so src/ui/*.cpp resolve them.
+target_include_directories(ProPager PRIVATE src src/ui)
 
 target_link_libraries(ProPager PRIVATE
     Qt6::Widgets
@@ -106,3 +112,21 @@ target_link_libraries(tst_pagercontroller PRIVATE
 )
 
 add_test(NAME tst_pagercontroller COMMAND tst_pagercontroller)
+
+qt_add_executable(tst_ui
+    tests/tst_ui.cpp
+    src/ui/mainwindow.cpp
+    src/pagercontroller.cpp
+    src/propresenterclient.cpp
+    src/config.cpp
+)
+
+target_include_directories(tst_ui PRIVATE src src/ui)
+
+target_link_libraries(tst_ui PRIVATE
+    Qt6::Widgets
+    Qt6::Network
+    Qt6::Test
+)
+
+add_test(NAME tst_ui COMMAND tst_ui)

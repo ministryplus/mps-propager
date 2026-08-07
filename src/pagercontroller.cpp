@@ -51,6 +51,11 @@ QList<PagerController::Batch> PagerController::queuedBatches() const
     return QList<Batch>(m_queue.begin(), m_queue.end());
 }
 
+PagerController::Batch PagerController::currentBatch() const
+{
+    return m_currentBatch;
+}
+
 int PagerController::queuedCount() const { return m_queue.size(); }
 
 QString PagerController::lastNumber() const { return m_lastNumber; }

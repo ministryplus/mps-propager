@@ -1,15 +1,15 @@
 #include <QApplication>
 #include <QDir>
 #include <QFile>
-#include <QMenu>
 #include <QMutex>
-#include <QStyle>
-#include <QSystemTrayIcon>
 #include <QTextStream>
 
 #include "config.h"
 #include "pagercontroller.h"
 #include "propresenterclient.h"
+#include "slackclient.h"
+#include "ui/mainwindow.h"
+#include "ui/traymenu.h"
 
 namespace {
 
@@ -83,24 +83,67 @@ int main(int argc, char *argv[])
                           config.batchWaitTime() * 1000,
                           config.batchMaxCount(),
                           config.expireTime() * 1000);
-    pager.start();
+
+    // Slack layer (Tasks 001-5/001-7). Passing the controller lets SlackClient
+    // enqueue pages and route emoji feedback internally — none of that wiring
+    // lives here (Task 7 owns it), keeping main.cpp purely about UI + lifecycle.
+    SlackClient slack(config, &pager);
 
     // Menu-bar / tray app: closing or hiding a window must not quit the process.
     app.setQuitOnLastWindowClosed(false);
 
-    // Placeholder tray icon (real assets are Task 8). A concrete icon is needed
-    // or the tray item may not render on some platforms.
-    const QIcon icon = app.style()->standardIcon(QStyle::SP_ComputerIcon);
-    QSystemTrayIcon tray(icon);
-    tray.setToolTip("ProPager");
+    // UI (Task 001-6). Both surfaces update by direct signal/slot connections
+    // (Decision 7) — there is no polling thread.
+    MainWindow window(&pager);
+    TrayMenu tray(&pager);
 
-    QMenu menu;
-    QAction *quitAction = menu.addAction("Quit");
-    QObject::connect(quitAction, &QAction::triggered, &app, &QApplication::quit);
-    tray.setContextMenu(&menu);
+    // Connection state -> status labels/actions on both surfaces.
+    QObject::connect(&slack, &SlackClient::connected, &window,
+                     [&window] { window.setSlackConnected(true); });
+    QObject::connect(&slack, &SlackClient::disconnected, &window,
+                     [&window] { window.setSlackConnected(false); });
+    QObject::connect(&slack, &SlackClient::connected, &tray,
+                     [&tray] { tray.setSlackConnected(true); });
+    QObject::connect(&slack, &SlackClient::disconnected, &tray,
+                     [&tray] { tray.setSlackConnected(false); });
 
-    tray.setVisible(true);
+    QObject::connect(&proPresenter, &ProPresenterClient::connected, &window,
+                     [&window] { window.setProPresConnected(true); });
+    QObject::connect(&proPresenter, &ProPresenterClient::disconnected, &window,
+                     [&window] { window.setProPresConnected(false); });
+    QObject::connect(&proPresenter, &ProPresenterClient::connected, &tray,
+                     [&tray] { tray.setProPresConnected(true); });
+    QObject::connect(&proPresenter, &ProPresenterClient::disconnected, &tray,
+                     [&tray] { tray.setProPresConnected(false); });
 
-    // Start minimized to tray: no main window is shown in this task.
+    // Controller state transitions -> re-render active/queue on both surfaces.
+    for (const auto signal : {&PagerController::queued, &PagerController::onScreen,
+                              &PagerController::cleared}) {
+        QObject::connect(&pager, signal, &window, &MainWindow::refresh);
+        QObject::connect(&pager, signal, &tray, &TrayMenu::refreshActive);
+    }
+
+    // Open Window from the tray shows/raises the status window.
+    QObject::connect(&tray, &TrayMenu::openWindowRequested, &window, [&window] {
+        window.show();
+        window.raise();
+        window.activateWindow();
+    });
+
+    // Fatal config/connection errors surface as a modal (mainwindow.py parity).
+    // NOTE (Task 6 open item): both clients also emit error() for transient
+    // failures (reconnect backoff, a failed reactions.add). Routing every one
+    // to the modal can spam during a network blip; distinguishing transient
+    // from fatal needs a separate client-side signal and is left as a follow-up.
+    QObject::connect(&slack, &SlackClient::error, &window,
+                     &MainWindow::showSetupError);
+    QObject::connect(&proPresenter, &ProPresenterClient::error, &window,
+                     &MainWindow::showSetupError);
+
+    // Startup clear (Decision 5), then connect to Slack. The app starts in the
+    // tray; the window is shown on demand via Open Window.
+    pager.start();
+    slack.start();
+
     return app.exec();
 }
