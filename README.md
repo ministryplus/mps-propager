@@ -31,3 +31,22 @@ Run `./build.sh` to produce a signed, notarized, stapled `ProPager.dmg`.
 - Can we pull a list of available channels?
 - Add logging level to config file, duplicate console out to log file for Debug level
 
+## Acknowledgements
+
+ProPager is a native Qt6/C++ rewrite of the original
+[**propresenter-slack-forwarder**](https://github.com/IAmTomahawkx/propresenter-slack-forwarder)
+by [IAmTomahawkx](https://github.com/IAmTomahawkx). That project — a Python/PyQt
+app driving ProPresenter over its WebSocket remote protocol with `slack-bolt` —
+is the conceptual origin of this one and the reference for its behavior
+(number batching, the Slack command grammar, and the Slack ⇄ ProPresenter flow).
+Full credit for the original idea and the legacy implementation goes to
+IAmTomahawkx.
+
+The legacy Python sources (`bot.py`, `main.py`, `ui/*.py`, `server.py`, …) remain
+in this repository as a reference during the rewrite and are removed once parity
+is confirmed (see `docs/tasks/001-8-build-pipeline.md`).
+
+## License
+
+Released under the [MIT License](LICENSE) — Copyright (c) 2026 Ministry Plus Solutions Inc.
+
