@@ -18,6 +18,7 @@ qt_add_executable(ProPager
     MACOSX_BUNDLE
     src/main.cpp
     src/config.cpp
+    src/propresenterclient.cpp
 )
 
 target_link_libraries(ProPager PRIVATE
@@ -51,3 +52,19 @@ target_link_libraries(tst_config PRIVATE
 )
 
 add_test(NAME tst_config COMMAND tst_config)
+
+qt_add_executable(tst_propresenterclient
+    tests/tst_propresenterclient.cpp
+    src/propresenterclient.cpp
+    src/config.cpp
+)
+
+target_include_directories(tst_propresenterclient PRIVATE src)
+
+target_link_libraries(tst_propresenterclient PRIVATE
+    Qt6::Core
+    Qt6::Network
+    Qt6::Test
+)
+
+add_test(NAME tst_propresenterclient COMMAND tst_propresenterclient)

@@ -1,10 +1,32 @@
 # Task 001-3: ProPresenter Client (REST /v1)
 
 **Spec:** [001 — ProPager Qt6/C++ Rewrite](../specs/001-propager-qt-rewrite.md)
-**Status:** Pending
+**Status:** Complete
 **Parallel group:** Wave 3 (parallel with [001-5](001-5-slack-client.md))
 **Depends on:** [001-2](001-2-config-layer.md)
 **Blocks:** [001-4](001-4-pager-controller.md)
+
+## Build notes (2026-08-06)
+
+**Open TODO 1 closed.** The per-message endpoints were confirmed against the
+authoritative ProPresenter OpenAPI spec (`jeffmikels/ProPresenter-API`,
+`pro7.9.openapi-spec.json`, mirroring `openapi.propresenter.com`):
+
+- `GET /v1/message/{id}/clear` — per-message clear, `204 No Content`. **Confirmed
+  as expected.** The layer-wide `GET /v1/clear/layer/messages` is not used.
+- **Correction:** trigger is `POST /v1/message/{id}/trigger` (not the `GET` this
+  task file originally assumed). The client uses `POST`; success is still
+  `204 No Content` and no body is parsed. The optional token-override body is
+  sent as an empty JSON array.
+- `PUT /v1/message/{id}` and `POST /v1/messages` share the Decision-4 body
+  schema (`id`, `message`, `theme` required); the `{id}` path segment uses the
+  stored message's `uuid` (falling back to its `name`).
+
+Pure request/response logic (`apiBase`, `buildMessageBody`, `pickTheme`,
+`findMessageId`, `pathId`) is unit-tested in `tests/tst_propresenterclient.cpp`.
+The network round-trips (ensure/create, set, trigger, clear, startup recovery)
+still require the live-ProPresenter manual verification in the section below —
+not runnable in this build environment.
 
 ## What
 
