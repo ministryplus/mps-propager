@@ -73,7 +73,7 @@ Task 2).
 | 2 | [001-2-config-layer.md](001-2-config-layer.md) ✅ | 2 | 1 | 3, 5 |
 | 3 | [001-3-propresenter-client.md](001-3-propresenter-client.md) ✅ | 3 | 2 | 4 |
 | 4 | [001-4-pager-controller.md](001-4-pager-controller.md) | 4 | 3, 5 | 6, 7 |
-| 5 | [001-5-slack-client.md](001-5-slack-client.md) | 3 | 2 | 4 |
+| 5 | [001-5-slack-client.md](001-5-slack-client.md) ✅ | 3 | 2 | 4 |
 | 6 | [001-6-ui.md](001-6-ui.md) | 5 | 4 | 8 |
 | 7 | [001-7-commands-edge-cases.md](001-7-commands-edge-cases.md) | 5 | 4 | 8 |
 | 8 | [001-8-build-pipeline.md](001-8-build-pipeline.md) | 6 | 6, 7 | — |

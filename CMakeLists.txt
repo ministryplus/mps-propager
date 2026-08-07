@@ -19,6 +19,7 @@ qt_add_executable(ProPager
     src/main.cpp
     src/config.cpp
     src/propresenterclient.cpp
+    src/slackclient.cpp
 )
 
 target_link_libraries(ProPager PRIVATE
@@ -68,3 +69,20 @@ target_link_libraries(tst_propresenterclient PRIVATE
 )
 
 add_test(NAME tst_propresenterclient COMMAND tst_propresenterclient)
+
+qt_add_executable(tst_slackclient
+    tests/tst_slackclient.cpp
+    src/slackclient.cpp
+    src/config.cpp
+)
+
+target_include_directories(tst_slackclient PRIVATE src)
+
+target_link_libraries(tst_slackclient PRIVATE
+    Qt6::Core
+    Qt6::Network
+    Qt6::WebSockets
+    Qt6::Test
+)
+
+add_test(NAME tst_slackclient COMMAND tst_slackclient)

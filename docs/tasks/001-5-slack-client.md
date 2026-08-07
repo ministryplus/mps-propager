@@ -1,7 +1,7 @@
 # Task 001-5: Slack Client (Socket Mode + Web API)
 
 **Spec:** [001 — ProPager Qt6/C++ Rewrite](../specs/001-propager-qt-rewrite.md)
-**Status:** Pending
+**Status:** Complete
 **Parallel group:** Wave 3 (parallel with [001-3](001-3-propresenter-client.md))
 **Depends on:** [001-2](001-2-config-layer.md)
 **Blocks:** [001-4](001-4-pager-controller.md)
@@ -43,6 +43,22 @@ Build `SlackClient`, a hand-rolled Slack Socket Mode + Web API client with no SD
 | src/slackclient.h | Create |
 | src/slackclient.cpp | Create |
 | CMakeLists.txt | Modify |
+
+## Build notes (2026-08-06)
+
+Implemented as a QObject over a single `QWebSocket` (Socket Mode) + one
+`QNetworkAccessManager` (Web API), no threads (Decision 7); no SDK / QJSEngine /
+bolt-js / Node sidecar (Decisions 8 & 9). Auth is bot + app tokens from
+`Config` only — no OAuth, no `fetch_tokens`, no `[network]` section (Decision 3).
+
+Pure envelope/response logic (`buildAck`, `extractMessageEvent`,
+`wssUrlFromConnectionsOpen`, `channelsFromConversations`, `nextBackoffMs`) is
+unit-tested in `tests/tst_slackclient.cpp`. Reconnect backoff is exponential
+from 1s, capped at 30s, and resets on a healthy connect. The live round-trips
+(real `apps.connections.open` handshake, `messageReceived` from a posted Slack
+message, `reactions.add`, `users.conversations`, socket-drop reconnect) require
+real Slack tokens and are covered by the manual verification below — not
+runnable in this build environment.
 
 ## Verification
 
