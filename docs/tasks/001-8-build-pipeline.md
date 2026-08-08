@@ -1,7 +1,7 @@
 # Task 001-8: Build, Sign & Ship Pipeline
 
 **Spec:** [001 — ProPager Qt6/C++ Rewrite](../specs/001-propager-qt-rewrite.md)
-**Status:** Signed/notarized/stapled `.dmg` produced & verified on the dev Mac (2026-08-08). Only the second-Mac parity check (and the Python cleanup it gates) remains.
+**Status:** ✅ Complete (2026-08-08). Signed/notarized/stapled `.dmg` produced and verified on the dev Mac and a second Mac; legacy Python originals removed.
 **Parallel group:** Wave 6 (solo — needs the full app)
 **Depends on:** [001-6](001-6-ui.md), [001-7](001-7-commands-edge-cases.md)
 **Blocks:** —
@@ -38,8 +38,8 @@ Stand up the local build-and-ship pipeline that turns the finished Qt6/C++ app i
 - [x] `spctl -a -vvv` and `codesign --verify --deep --strict` pass on the `.app`. — `spctl`: `accepted / source=Notarized Developer ID`; `codesign --verify --deep --strict`: valid, satisfies its Designated Requirement.
 - [x] `xcrun stapler validate` passes on **both** the `.app` and the `.dmg`. — both validate; dmg staple survives the versioned rename (ticket is bound to content, not filename).
 - [x] `lipo -archs` on the main binary shows `x86_64 arm64`. — verified on the deployed bundle.
-- [ ] The `.dmg` launches clean on a SECOND Mac with no Python and no Qt installed — mounts, app opens to a working tray icon, no Gatekeeper warning, no runtime prerequisites. — **OPERATOR** (needs a second Mac).
-- [ ] Python originals deleted per the Removed Files table, done LAST and only after parity is confirmed. — **DEFERRED:** intentionally not deleted; do this only after the operator confirms end-to-end parity on a second Mac.
+- [x] The `.dmg` launches clean on a SECOND Mac with no Python and no Qt installed — mounts, app opens to a working tray icon, no Gatekeeper warning, no runtime prerequisites. — confirmed on a second Mac (2026-08-08).
+- [x] Python originals deleted per the Removed Files table, done LAST and only after parity is confirmed. — done in two commits: `server.py` + config in `ac8a36e`, the rest via the `chore/remove-legacy-python` branch merged after the second-Mac parity check passed.
 
 ## Operator hand-off (steps that can't run in the dev environment)
 
@@ -50,11 +50,11 @@ Stand up the local build-and-ship pipeline that turns the finished Qt6/C++ app i
 2. ~~**Run `./build.sh`** — produces the signed/notarized/stapled `.dmg` and runs
    the `spctl` / `codesign` / `stapler validate` / `lipo` checks itself.~~ **DONE**
    (2026-08-08) — produced `dist/ProPager-0.1.0.dmg`; all checks pass.
-3. **Verify on a second Mac** (no Python, no Qt): mount the `.dmg`, launch, confirm
-   the tray icon works with no Gatekeeper warning. ← **ONLY REMAINING STEP.**
-4. **Only after parity is confirmed**, delete the Python originals per the Removed
-   Files table — already staged on branch `chore/remove-legacy-python`; merge it.
-   (`server.py` + its config were removed early in `ac8a36e`.)
+3. ~~**Verify on a second Mac** (no Python, no Qt): mount the `.dmg`, launch, confirm
+   the tray icon works with no Gatekeeper warning.~~ **DONE** (2026-08-08) — passed.
+4. ~~**Only after parity is confirmed**, delete the Python originals per the Removed
+   Files table.~~ **DONE** — `server.py` + config in `ac8a36e`; the rest via
+   `chore/remove-legacy-python`, merged once step 3 passed.
 
 ## Files Changed
 
