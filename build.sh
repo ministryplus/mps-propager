@@ -34,7 +34,8 @@ DEV_ID="${DEV_ID:-Developer ID Application: Isaac Wiebe (S8KL27Z2X8)}" # signing
 NOTARY_PROFILE="${NOTARY_PROFILE:-NOTARY_PWD}"                      # stored notarytool keychain profile
 ENTITLEMENTS="${ENTITLEMENTS:-$REPO_ROOT/entitlements.plist}"
 APP_NAME="ProPager"
-DMG_PATH="$DIST_DIR/${APP_NAME}.dmg"
+# DMG_PATH is derived after the build from the bundle's version (see step 3) so
+# the version lives in one place — CMakeLists.txt's MACOSX_BUNDLE_* fields.
 
 log()  { printf '\033[1;34m▸ %s\033[0m\n' "$*"; }
 die()  { printf '\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
@@ -68,6 +69,11 @@ rm -rf "$DIST_DIR"
 APP="$(/usr/bin/find "$DIST_DIR" -maxdepth 3 -name "${APP_NAME}.app" -type d | head -n1)"
 [ -n "$APP" ] || die "deployed ${APP_NAME}.app not found under $DIST_DIR"
 log "Deployed bundle: $APP"
+
+# Name the .dmg with the bundle's version (single source of truth: CMakeLists).
+VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' \
+    "$APP/Contents/Info.plist" 2>/dev/null)" || die "could not read version from Info.plist"
+DMG_PATH="$DIST_DIR/${APP_NAME}-${VERSION}.dmg"
 
 # ── 4. Codesign inside-out: nested code FIRST, .app LAST ─────────────────────
 #     Hardened runtime (--options runtime) + secure timestamp on everything.
