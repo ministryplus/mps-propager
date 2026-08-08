@@ -56,6 +56,37 @@ Stand up the local build-and-ship pipeline that turns the finished Qt6/C++ app i
    Files table.~~ **DONE** — `server.py` + config in `ac8a36e`; the rest via
    `chore/remove-legacy-python`, merged once step 3 passed.
 
+## Release checklist (repeatable, per version)
+
+The bring-up above is one-time and complete. Use this list to cut each
+subsequent versioned release.
+
+1. [ ] **Bump the version** in `CMakeLists.txt` (`MACOSX_BUNDLE_BUNDLE_VERSION`
+   + `MACOSX_BUNDLE_SHORT_VERSION_STRING`) and `src/main.cpp`
+   (`QCoreApplication::setApplicationVersion`) — keep the three in step. Commit.
+2. [ ] **Build:** `./build.sh` — produces `dist/ProPager-<version>.dmg` (name
+   derived from `CFBundleShortVersionString`), signed, notarized (**both** the
+   `.app` and the `.dmg`), stapled, universal2. It runs the `spctl` /
+   `codesign --verify --deep --strict` / `stapler validate` / `lipo` checks.
+3. [ ] **Verify the artifact:** mount the dmg and confirm — version matches;
+   `spctl -a -vvv` = `accepted / source=Notarized Developer ID`; `lipo -archs` =
+   `x86_64 arm64`; and the LGPL texts ship under
+   `ProPager.app/Contents/Resources/licenses/` (`THIRD-PARTY-NOTICES.md`,
+   `LICENSE`, `LGPL-3.0.txt`, `GPL-3.0.txt`).
+4. [ ] **Tag** the release commit: `git tag -a v<version> -m "…"` →
+   `git push origin v<version>`.
+5. [ ] **GitHub release:** `gh release create v<version> --draft`, attach
+   `dist/ProPager-<version>.dmg`, write notes → publish with
+   `gh release edit v<version> --draft=false`.
+
+### v0.5.0 — 2026-08-08 ✅ published
+
+All five steps done — <https://github.com/ministryplus/mps-propager/releases/tag/v0.5.0>.
+This cycle also added **LGPLv3 compliance** (`44e7920`): the bundle now carries
+the Qt LGPLv3/GPLv3 texts + `THIRD-PARTY-NOTICES.md` (written source offer) under
+`Contents/Resources/licenses/`, surfaced via **About ProPager → Show Licenses**;
+verified present in the shipped `ProPager-0.5.0.dmg`.
+
 ## Files Changed
 
 | File | Action |
