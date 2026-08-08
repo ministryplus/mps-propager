@@ -3,11 +3,17 @@
 #include <QAction>
 #include <QApplication>
 #include <QColor>
+#include <QCoreApplication>
+#include <QDesktopServices>
+#include <QDir>
 #include <QMenu>
+#include <QMessageBox>
 #include <QPainter>
 #include <QPixmap>
+#include <QPushButton>
 #include <QStyle>
 #include <QSystemTrayIcon>
+#include <QUrl>
 
 #include "pagercontroller.h"
 
@@ -90,6 +96,11 @@ TrayMenu::TrayMenu(PagerController *pager, QObject *parent)
     connect(openAction, &QAction::triggered, this,
             &TrayMenu::openWindowRequested);
 
+    // About carries the Qt/LGPLv3 attribution and the route to the bundled
+    // license texts (LGPL compliance) — see showAbout().
+    QAction *aboutAction = m_menu->addAction(QStringLiteral("About ProPager"));
+    connect(aboutAction, &QAction::triggered, this, &TrayMenu::showAbout);
+
     QAction *quitAction = m_menu->addAction(QStringLiteral("Quit"));
     connect(quitAction, &QAction::triggered, qApp, &QApplication::quit);
 
@@ -98,6 +109,60 @@ TrayMenu::TrayMenu(PagerController *pager, QObject *parent)
 
     // Both clients start disconnected, so render the initial warning state.
     refreshWarningState();
+}
+
+void TrayMenu::showAbout()
+{
+    // Where the license texts live in a released bundle: MacOS/ (applicationDir)
+    // has a sibling Resources/licenses/ — mirrors the CMake install DESTINATION.
+    // In a plain dev/test build this directory won't exist; we fall back to the
+    // online Qt licensing page so the button always leads somewhere useful.
+    const QString licensesDir = QDir::cleanPath(
+        QCoreApplication::applicationDirPath() +
+        QStringLiteral("/../Resources/licenses"));
+    const bool haveBundledLicenses = QDir(licensesDir).exists();
+
+    const QString version = QCoreApplication::applicationVersion();
+    const QString heading = version.isEmpty()
+                                ? QStringLiteral("ProPager")
+                                : QStringLiteral("ProPager %1").arg(version);
+
+    // Rich text so the Qt source / licensing links are clickable. The Qt version
+    // is the compile-time QT_VERSION_STR, so it always matches what we linked.
+    const QString body = QStringLiteral(
+        "<p><b>%1</b><br>Copyright &copy; 2026 Ministry Plus Solutions Inc.<br>"
+        "Released under the MIT License.</p>"
+        "<p>This application uses the <b>Qt framework %2</b> under the GNU Lesser "
+        "General Public License v3.0 (LGPLv3), which incorporates the GNU GPL "
+        "v3.0. Qt is dynamically linked and may be replaced with a compatible "
+        "modified build.</p>"
+        "<p>Corresponding Qt source: "
+        "<a href=\"https://download.qt.io/archive/qt/6.8/6.8.3/single/\">"
+        "download.qt.io</a> &middot; "
+        "<a href=\"https://www.qt.io/licensing/\">Qt licensing</a></p>")
+        .arg(heading, QStringLiteral(QT_VERSION_STR));
+
+    QMessageBox box;
+    box.setWindowTitle(QStringLiteral("About ProPager"));
+    box.setTextFormat(Qt::RichText);
+    box.setText(body);
+    box.setTextInteractionFlags(Qt::TextBrowserInteraction);
+    box.setIconPixmap(m_normalIcon.pixmap(QSize(64, 64)));
+
+    QPushButton *showLicenses =
+        box.addButton(QStringLiteral("Show Licenses"), QMessageBox::ActionRole);
+    box.addButton(QMessageBox::Close);
+    box.setDefaultButton(QMessageBox::Close);
+    box.exec();
+
+    if (box.clickedButton() == showLicenses) {
+        // Reveal the bundled license folder, or the online licensing page when
+        // running outside a deployed bundle.
+        QDesktopServices::openUrl(
+            haveBundledLicenses
+                ? QUrl::fromLocalFile(licensesDir)
+                : QUrl(QStringLiteral("https://www.qt.io/licensing/")));
+    }
 }
 
 QString TrayMenu::warningTooltip(bool configValid, const QString &configSummary,

@@ -82,3 +82,9 @@ IAmTomahawkx.
 ## License
 
 Released under the [MIT License](LICENSE) — Copyright (c) 2026 Ministry Plus Solutions Inc.
+
+ProPager links dynamically against the Qt framework, used under the **GNU LGPL
+v3.0**. Third-party attribution, the Qt source-code offer, and the bundled
+LGPLv3/GPLv3 license texts are in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)
+and [`licenses/`](licenses/); the released `.app` ships these under
+`Contents/Resources/licenses/`, reachable via **About ProPager → Show Licenses**.

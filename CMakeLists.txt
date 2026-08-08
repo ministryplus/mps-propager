@@ -75,6 +75,19 @@ set_target_properties(ProPager PROPERTIES
     MACOSX_BUNDLE_ICON_FILE "propager.icns"
 )
 
+# Third-party license notices (LGPL compliance). Qt is used under LGPLv3 (which
+# incorporates GPLv3 by reference), so the distributed bundle MUST carry both
+# license texts plus our attribution/source-offer notice. These are installed
+# into Contents/Resources/licenses/ below and surfaced in-app via
+# "About ProPager → Show Licenses"; the path here is mirrored by the runtime
+# lookup in traymenu.cpp (applicationDirPath()/../Resources/licenses).
+set(PROPAGER_LICENSE_FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/THIRD-PARTY-NOTICES.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
+    "${CMAKE_CURRENT_SOURCE_DIR}/licenses/LGPL-3.0.txt"
+    "${CMAKE_CURRENT_SOURCE_DIR}/licenses/GPL-3.0.txt"
+)
+
 # Bundle Qt frameworks/plugins and fix rpaths into the .app on install. This is
 # the modern replacement for calling macdeployqt by hand; build.sh drives it via
 # `cmake --install`. Guarded to Apple so the ctest configure on other hosts is
@@ -90,6 +103,14 @@ if(APPLE)
         NO_UNSUPPORTED_PLATFORM_ERROR
     )
     install(SCRIPT ${deploy_script})
+
+    # Ship the license texts inside the bundle. Installed AFTER the deploy script
+    # so macdeployqt (which only touches Frameworks/PlugIns) can never clobber
+    # them, and BEFORE build.sh's inside-out codesign runs — files under
+    # Resources/ are sealed by the final `.app` signature, so they are covered.
+    install(FILES ${PROPAGER_LICENSE_FILES}
+        DESTINATION "ProPager.app/Contents/Resources/licenses"
+    )
 endif()
 
 # --- Tests -----------------------------------------------------------------

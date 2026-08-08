@@ -59,6 +59,11 @@ private:
     // tray's icon + tooltip. The single place the warning state is applied.
     void refreshWarningState();
 
+    // "About ProPager" dialog (LGPL compliance): states that the app uses Qt
+    // under LGPLv3, names the Qt version, and offers a "Show Licenses" button
+    // that reveals the bundled license texts (Contents/Resources/licenses).
+    void showAbout();
+
     // Menu-bar glyph (Task 8) and its derived amber warning variant, built once
     // in the constructor and swapped by refreshWarningState().
     QIcon m_normalIcon;
