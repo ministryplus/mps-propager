@@ -1,6 +1,7 @@
-# TODOs
+# ProPager - a Slack message bot for ProPresenter
 
-## Release build (Qt6/C++ rewrite)
+## Release build
+
 Run `./build.sh` to produce a signed, notarized, stapled `ProPager.dmg`.
 
 * **Qt MUST come from the official Qt online installer (LGPL).** Its macOS
@@ -11,28 +12,61 @@ Run `./build.sh` to produce a signed, notarized, stapled `ProPager.dmg`.
   `QT_DIR=`).
 * **Minimum macOS: 12 (Monterey).** Set by `CMAKE_OSX_DEPLOYMENT_TARGET` in
   `CMakeLists.txt` and bounded by Qt 6.8 LTS (its frameworks' `minos` is 12.0).
-  Targeting macOS 11 would require Qt 6.5 LTS instead.
 * Requires a `Developer ID Application` cert (com.isaacwiebe) in the keychain
   and a stored `notarytool` credential profile — see the header of `build.sh`.
 
-## Build Environment notes (legacy Python app)
-* Nuitka only supports Python 3.4 — 3.11
-* Cross-compiling not supported, must build on arm64e or x86_64 directly
+## Setup
 
-## Documentation
-* Slack setup: 
-    - Install application in Slack Workspace
-    - add the Bot as an app
-    - invite to Channel by messaging '@Number Service', channel must be public, find Channel ID on channel about page
-- ProPresenter: First message in the list, must have a token of 'Message', name doesn't matter, 'allow Web notif...' doesn't matter
+### ProPresenter
 
+* **ProPresenter ≥ 7.9** — the first version with the REST API ProPager drives
+  (released 2022-04-06). Earlier 7.x only shipped the undocumented WebSocket
+  remote protocol, which ProPager does **not** use.
+* Enable the API in ProPresenter → **Preferences → Network**: turn Network on
+  and note the **port** (ProPager talks to `http://<host>:<port>/v1`).
 
-## Coding
-- Better error handling for ProPresenter password missing
-- ProPresenter fails silently, if the first message type doesn't have a token
-- Change Channel ID with an Input field
-- Can we pull a list of available channels?
-- Add logging level to config file, duplicate console out to log file for Debug level
+### Slack app configuration
+
+ProPager connects over **Socket Mode** (no public URL / event request URL
+needed) and requires **two tokens**: a **bot token** (`xoxb-…`) and an
+**app-level token** (`xapp-…`).
+
+1. **Create the app** — <https://api.slack.com/apps> → *Create New App* → *From
+   scratch*. Name it **ProPager** and select your workspace.
+2. **Enable Socket Mode** — *Settings → Socket Mode* → toggle on.
+3. **App-level token** (`xapp-…`) — enabling Socket Mode prompts you to create
+   one (else *Basic Information → App-Level Tokens → Generate*). Give it the
+   **`connections:write`** scope. This is ProPager's **app-token**.
+4. **Bot token scopes** — *OAuth & Permissions → Scopes → Bot Token Scopes*,
+   add all of:
+
+   | Scope | Why ProPager needs it |
+   |---|---|
+   | `channels:history` | Read messages in public channels it's added to |
+   | `channels:join`    | Join public channels in the workspace |
+   | `channels:read`    | List / look up public channels (channel picker) |
+   | `chat:write`       | Send messages as @ProPager |
+   | `groups:history`   | Read messages in private channels it's added to |
+   | `reactions:read`   | View emoji reactions and their content |
+   | `reactions:write`  | Add the ⌛ / 📞 / 👍 feedback reactions |
+
+5. **Subscribe to message events** — *Event Subscriptions* → toggle on →
+   *Subscribe to bot events* → add:
+
+   | Event | Fires when | Scope Slack adds |
+   |---|---|---|
+   | `message.channels` | A message is posted to a public channel | `channels:history` |
+   | `message.groups`   | A message is posted to a private channel | `groups:history` |
+
+   (These are the same `*:history` scopes from step 4 — Slack adds them for you
+   here.) Without these events, Socket Mode delivers no messages and ProPager
+   sees nothing.
+6. **Install to workspace** — *OAuth & Permissions → Install to Workspace*
+   (re-install here whenever you change scopes). Copy the **Bot User OAuth
+   Token** (`xoxb-…`) — this is ProPager's **bot-token**.
+7. **Invite the bot** to the channel it should watch (`/invite @ProPager`).
+8. **Enter both tokens and the channel** in ProPager's **Connections** tab:
+   bot token `xoxb-…`, app-level token `xapp-…`.
 
 ## Acknowledgements
 
@@ -45,11 +79,6 @@ is the conceptual origin of this one and the reference for its behavior
 Full credit for the original idea and the legacy implementation goes to
 IAmTomahawkx.
 
-The legacy Python sources (`bot.py`, `main.py`, `ui/*.py`, `server.py`, …) remain
-in this repository as a reference during the rewrite and are removed once parity
-is confirmed (see `docs/tasks/001-8-build-pipeline.md`).
-
 ## License
 
 Released under the [MIT License](LICENSE) — Copyright (c) 2026 Ministry Plus Solutions Inc.
-
