@@ -153,7 +153,8 @@ SlackClient::ParsedCommand SlackClient::parseCommand(const QString &text,
                                                      const QStringList &ignoreNumbers,
                                                      bool hasLastNumber)
 {
-    // Ports bot.py on_message precedence exactly. '!'-prefix drops first (even
+    // Ports the original bot.py's on_message precedence exactly (git history).
+    // '!'-prefix drops first (even
     // when the text contains a number), then a 4-digit run wins over the
     // repeat/cancel substrings, then repeat before cancel.
     if (text.startsWith(QLatin1Char('!'))) {
@@ -305,7 +306,7 @@ void SlackClient::onTextMessageReceived(const QString &frame)
 void SlackClient::handleMessage(const QString &text, const QString &ts,
                                 const QString &channel)
 {
-    // Ports the body of bot.py on_message. Classification is pure
+    // Ports the body of on_message from the original bot.py (git history). Classification is pure
     // (parseCommand); this method performs the side effects. Deferred feedback
     // (⌛ on busy-enqueue, 📞 on screen, 👍 on clear) is emitted by the
     // controller's signals wired in the constructor — only the immediate
@@ -340,7 +341,7 @@ void SlackClient::handleMessage(const QString &text, const QString &ts,
         return;
     case MessageAction::Repeat:
         // Re-send the prior number as a fresh page, keyed to THIS message's ts
-        // so its feedback lands on the "repeat" message (bot.py sender(ts)).
+        // so its feedback lands on the "repeat" message (the original bot.py's sender(ts)).
         if (m_controller)
             m_controller->enqueueNumber(ts, m_lastNumber);
         return;

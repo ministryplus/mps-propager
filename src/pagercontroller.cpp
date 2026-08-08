@@ -83,7 +83,7 @@ void PagerController::enqueueNumber(const QString &msgId, const QString &number)
     // window on the first number (later numbers within the window do not
     // restart it). Feedback is immediate.
     //
-    // Ports bot.py's hourglass check (Task 001-7): evaluated BEFORE the number
+    // Ports the original bot.py's hourglass check (git history; Task 001-7): evaluated BEFORE the number
     // joins the batch, the slot is "busy" when a batch is already waiting, one
     // is on screen, or the forming batch has hit batchMaxCount. Only then does
     // the number earn a ⌛ (queuedBusy); an idle first number does not.
@@ -102,10 +102,10 @@ void PagerController::enqueueNumber(const QString &msgId, const QString &number)
 
 void PagerController::cancel()
 {
-    // On-demand clear (bot.py `cancel`). If a batch is on screen, stop its
+    // On-demand clear (the original bot.py's `cancel`; git history). If a batch is on screen, stop its
     // expiry timer and run the same teardown the timer would have — clear the
     // message, signal cleared, return to Idle, and pop the next batch. When
-    // nothing is showing, still hide the message defensively (bot.py always
+    // nothing is showing, still hide the message defensively (the original bot.py always
     // sent messageHide) without touching queue state.
     if (m_state == State::Showing) {
         m_expiryTimer->stop();

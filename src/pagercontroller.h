@@ -12,9 +12,11 @@ class ProPresenterClient;
 class QTimer;
 
 // PagerController is the coordinating core (Spec 001, Decisions 5-7). It ports
-// bot.py's batching/queue/display behavior (add_to_queue,
+// the original Python app's batching/queue/display behavior (add_to_queue,
 // task_add_batch_to_queue, process_number_batch, task_send_numbers,
-// pro7_send_waiter) onto a single Qt event loop — no threads, no asyncio.
+// pro7_send_waiter) onto a single Qt event loop — no threads, no asyncio. That
+// original lives in git history as bot.py (removed once the rewrite hit parity);
+// the "bot.py" references below and in pagercontroller.cpp point there.
 //
 // Timing is two single-shot QTimers: a batch-window (debounce) timer that
 // gathers numbers arriving close together into one Batch, and an expiry
@@ -80,7 +82,7 @@ public slots:
     // Ports add_to_queue: append to the current batch, arm the batch window if
     // idle, and emit queued(msgId) for feedback.
     void enqueueNumber(const QString &msgId, const QString &number);
-    // Ports bot.py's `cancel` branch (Task 001-7): clear the on-screen ProPager
+    // Ports the original bot.py's `cancel` branch (Task 001-7): clear the on-screen ProPager
     // message immediately (per-message, Decision 5) and advance to the next
     // queued batch, instead of waiting for the expiry timer. A no-op display
     // change when nothing is showing (still hides the message defensively).

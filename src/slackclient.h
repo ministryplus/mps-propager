@@ -14,7 +14,8 @@ class Config;
 class PagerController;
 class QNetworkReply;
 
-// A channel the bot can see (ported from bot.py fetch_channel_list).
+// A channel the bot can see (ported from fetch_channel_list in the original
+// bot.py, now in git history).
 struct SlackChannel
 {
     QString name;
@@ -52,7 +53,8 @@ public:
                          PagerController *controller = nullptr,
                          QObject *parent = nullptr);
 
-    // The inbound-message grammar (Decision 6), ported from bot.py on_message.
+    // The inbound-message grammar (Decision 6), ported from on_message in the
+    // original bot.py (git history).
     enum class MessageAction {
         Ignore,        // dropped: '!'-prefix, or noise with no number/command
         Page,          // a fresh 4-digit number to forward (see `number`)
@@ -70,7 +72,7 @@ public:
     // --- Pure helpers (no network; unit-tested directly) -------------------
 
     // Classify one listen-channel message (channel filtering already applied by
-    // extractMessageEvent). Ports bot.py's on_message precedence exactly:
+    // extractMessageEvent). Ports the original bot.py's on_message precedence exactly (git history):
     // '!'-prefix drops first; then the first 4-digit run wins (ignore-list ->
     // IgnoredNumber, else Page); then "repeat" (case-insensitive substring;
     // Repeat when hasLastNumber, else RepeatNoLast); then "cancel"; else Ignore.

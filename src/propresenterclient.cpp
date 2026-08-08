@@ -71,7 +71,7 @@ QJsonArray ProPresenterClient::themesFromResponse(const QJsonObject &response)
 
 QJsonObject ProPresenterClient::pickTheme(const QJsonArray &themes)
 {
-    // Port of bot.py propres_create_message: first slide whose id.name contains
+    // Port of propres_create_message from the original bot.py (git history): first slide whose id.name contains
     // "vk" (case-insensitive) wins; otherwise fall back to themes[0].slides[0].
     for (const QJsonValue &themeVal : themes) {
         const QJsonArray slides = themeVal.toObject().value("slides").toArray();

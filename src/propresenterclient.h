@@ -60,7 +60,8 @@ public:
     // `themes`.
     static QJsonArray themesFromResponse(const QJsonObject &response);
 
-    // Port of bot.py propres_create_message theme-lookup: return the id-object
+    // Port of propres_create_message theme-lookup from the original bot.py (git
+    // history): return the id-object
     // of a slide whose id.name contains "vk" (case-insensitive); if none
     // matches, fall back to the first theme's first slide (themes[0].slides[0]
     // .id). Returns an empty object if `themes` is empty/malformed.
