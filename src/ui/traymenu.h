@@ -1,6 +1,7 @@
 #ifndef PROPAGER_UI_TRAYMENU_H
 #define PROPAGER_UI_TRAYMENU_H
 
+#include <QIcon>
 #include <QObject>
 #include <QString>
 
@@ -57,6 +58,11 @@ private:
     // Reconcile config validity + both client-connected booleans into the
     // tray's icon + tooltip. The single place the warning state is applied.
     void refreshWarningState();
+
+    // Menu-bar glyph (Task 8) and its derived amber warning variant, built once
+    // in the constructor and swapped by refreshWarningState().
+    QIcon m_normalIcon;
+    QIcon m_warningIcon;
 
     PagerController *m_pager;
     QSystemTrayIcon *m_tray;

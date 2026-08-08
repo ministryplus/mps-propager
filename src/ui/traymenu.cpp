@@ -2,11 +2,45 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QColor>
 #include <QMenu>
+#include <QPainter>
+#include <QPixmap>
 #include <QStyle>
 #include <QSystemTrayIcon>
 
 #include "pagercontroller.h"
+
+namespace {
+
+// Derive the warning variant from the normal glyph (Task 002-6, step 6):
+// recolour its silhouette amber so the delta reads at a glance in the menu bar,
+// while the tooltip carries the actual reason. A concrete colour — not a mask —
+// so it stays visible in both light and dark bars. Covers the 1x and 2x
+// (~18pt-tall) menu-bar slots so Retina stays crisp.
+QIcon tintedWarningIcon(const QIcon &glyph)
+{
+    const QColor amber(0xE6, 0x9A, 0x00);
+    QIcon warn;
+    for (int edge : {18, 36}) {
+        QPixmap base = glyph.pixmap(QSize(edge, edge));
+        if (base.isNull())
+            continue;
+        QPixmap tinted(base.size());
+        tinted.setDevicePixelRatio(base.devicePixelRatio());
+        tinted.fill(Qt::transparent);
+        QPainter p(&tinted);
+        p.drawPixmap(0, 0, base);
+        // Keep the glyph's alpha silhouette, replace its colour with amber.
+        p.setCompositionMode(QPainter::CompositionMode_SourceIn);
+        p.fillRect(tinted.rect(), amber);
+        p.end();
+        warn.addPixmap(tinted);
+    }
+    return warn;
+}
+
+} // namespace
 
 TrayMenu::TrayMenu(PagerController *pager, QObject *parent)
     : QObject(parent), m_pager(pager)
@@ -14,9 +48,21 @@ TrayMenu::TrayMenu(PagerController *pager, QObject *parent)
     m_menu = new QMenu;
     m_tray = new QSystemTrayIcon(this);
 
-    // Placeholder icon (real menu-bar assets are Task 8). A concrete icon is
-    // needed or the tray item may not render on some platforms.
-    m_tray->setIcon(qApp->style()->standardIcon(QStyle::SP_ComputerIcon));
+    // Menu-bar assets (Task 8). The glyph ships as a Qt resource; setIsMask makes
+    // macOS render it as a template image (black in a light bar, white in a dark
+    // one), matching the *Template naming convention. The warning variant is
+    // derived from it. If the resource is ever missing (e.g. a stripped test
+    // build) fall back to the Task 1 standard icons so the tray still renders.
+    QIcon glyph(QStringLiteral(":/icons/MenubarTemplate.png"));
+    if (glyph.isNull()) {
+        m_normalIcon = qApp->style()->standardIcon(QStyle::SP_ComputerIcon);
+        m_warningIcon = qApp->style()->standardIcon(QStyle::SP_MessageBoxWarning);
+    } else {
+        glyph.setIsMask(true);
+        m_normalIcon = glyph;
+        m_warningIcon = tintedWarningIcon(glyph);
+    }
+    m_tray->setIcon(m_normalIcon);
     m_tray->setToolTip(QStringLiteral("ProPager"));
 
     // Order mirrors widget.py: ProPresenter status, Slack status, separator,
@@ -113,13 +159,12 @@ void TrayMenu::refreshWarningState()
     const QString reason = warningTooltip(m_configValid, m_configSummary,
                                           m_slackConnected, m_proPresConnected);
     if (reason.isEmpty()) {
-        m_tray->setIcon(qApp->style()->standardIcon(QStyle::SP_ComputerIcon));
+        m_tray->setIcon(m_normalIcon);
         m_tray->setToolTip(QStringLiteral("ProPager"));
     } else {
         // Warning variant + reason on hover, so the cause is available even if
         // the icon delta is subtle (step 6).
-        m_tray->setIcon(
-            qApp->style()->standardIcon(QStyle::SP_MessageBoxWarning));
+        m_tray->setIcon(m_warningIcon);
         m_tray->setToolTip(QStringLiteral("ProPager — %1").arg(reason));
     }
 }

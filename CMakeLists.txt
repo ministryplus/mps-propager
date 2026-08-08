@@ -45,6 +45,19 @@ target_link_libraries(ProPager PRIVATE
     Qt6::WebSockets
 )
 
+# Menu-bar glyph (Task 8). Compiled into the binary as a Qt resource rather than
+# copied to the bundle's Resources dir: the app *reads* this icon at runtime, so
+# an embedded resource resolves identically in a dev run and a signed .app with
+# no path juggling. BASE=data strips the dir so the .png lands at
+# ":/icons/MenubarTemplate.png"; the sibling @2x is picked up for Retina.
+qt_add_resources(ProPager "menubar"
+    PREFIX "/icons"
+    BASE "data"
+    FILES
+        data/MenubarTemplate.png
+        data/MenubarTemplate@2x.png
+)
+
 # macOS bundle identity (Decision 11). Display name / window title is ProPager;
 # the bundle identifier drives code-signing and QSettings later.
 set_target_properties(ProPager PROPERTIES
@@ -158,6 +171,16 @@ target_link_libraries(tst_ui PRIVATE
     Qt6::Widgets
     Qt6::Network
     Qt6::Test
+)
+
+# tst_ui constructs a real TrayMenu, so it needs the same menu-bar resource the
+# app does — otherwise the icon load silently falls back to the placeholder.
+qt_add_resources(tst_ui "menubar"
+    PREFIX "/icons"
+    BASE "data"
+    FILES
+        data/MenubarTemplate.png
+        data/MenubarTemplate@2x.png
 )
 
 add_test(NAME tst_ui COMMAND tst_ui)
