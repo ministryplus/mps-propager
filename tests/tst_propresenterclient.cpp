@@ -1,9 +1,13 @@
 #include <QtTest>
 
+#include <QHostAddress>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QString>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <QTemporaryDir>
+#include <QTimer>
 
 #include "config.h"
 #include "propresenterclient.h"
@@ -241,6 +245,96 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(disconnects >= 1, 3000);
         // The aborted first attempt must not itself report a disconnect.
         QCOMPARE(disconnects, 1);
+    }
+
+    // Regression (live bug): a page displayed the PREVIOUS number first and then
+    // updated to the new one, because trySend() fired setNumber() (PUT) and
+    // trigger() (POST) back-to-back and they raced on the wire — the trigger
+    // frequently reached ProPresenter before the PUT text was applied. trigger()
+    // must therefore defer until the in-flight setNumber() PUT has completed, so
+    // ProPresenter shows the number that was just set, never the stale one.
+    //
+    // Proven with a stub HTTP server that DELAYS the PUT response: with correct
+    // sequencing the /trigger request arrives only AFTER the PUT response is
+    // sent. A concurrent (buggy) trigger would arrive first.
+    void trigger_deferredUntilSetNumberPutCompletes()
+    {
+        QStringList events;               // ordered server-side milestones
+        constexpr int kPutDelayMs = 150;  // hold the PUT response to force a race
+
+        QTcpServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        const quint16 port = server.serverPort();
+
+        connect(&server, &QTcpServer::newConnection, &server, [&] {
+            while (QTcpSocket *sock = server.nextPendingConnection()) {
+                auto *buf = new QByteArray;
+                connect(sock, &QObject::destroyed, [buf] { delete buf; });
+                connect(sock, &QTcpSocket::disconnected, sock,
+                        &QObject::deleteLater);
+                connect(sock, &QTcpSocket::readyRead, sock, [&events, sock, buf] {
+                    buf->append(sock->readAll());
+                    if (!buf->contains("\r\n\r\n"))
+                        return; // wait for the full header block
+                    const QByteArray reqLine = buf->left(buf->indexOf("\r\n"));
+                    buf->clear();
+                    const auto send204 = [sock] {
+                        sock->write("HTTP/1.1 204 No Content\r\n"
+                                    "Content-Length: 0\r\n\r\n");
+                        sock->flush();
+                    };
+                    if (reqLine.startsWith("GET")
+                        && reqLine.contains("/v1/messages")) {
+                        // ensureMessage(): return the ProPager message so an id
+                        // resolves and setNumber()/trigger() proceed.
+                        const QByteArray body =
+                            "[{\"id\":{\"name\":\"ProPager\",\"uuid\":\"msg1\","
+                            "\"index\":0}}]";
+                        sock->write("HTTP/1.1 200 OK\r\n"
+                                    "Content-Type: application/json\r\n"
+                                    "Content-Length: "
+                                    + QByteArray::number(body.size())
+                                    + "\r\n\r\n" + body);
+                        sock->flush();
+                    } else if (reqLine.contains("/trigger")) {
+                        events << QStringLiteral("TRIG-recv");
+                        send204();
+                    } else if (reqLine.startsWith("PUT")) {
+                        QTimer::singleShot(kPutDelayMs, sock, [&events, send204] {
+                            events << QStringLiteral("PUT-resp");
+                            send204();
+                        });
+                    } else {
+                        send204(); // startup clear (GET .../clear) and the rest
+                    }
+                });
+            }
+        });
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        Config config(dir.filePath("ProPager.ini"));
+        config.load();
+        config.setPropresenterPort(port); // host defaults to 127.0.0.1
+        config.reload();
+        ProPresenterClient client(config);
+
+        bool connected = false;
+        connect(&client, &ProPresenterClient::connected, &client,
+                [&] { connected = true; });
+        client.ensureMessage();
+        QTRY_VERIFY_WITH_TIMEOUT(connected, 3000); // message id resolved
+
+        client.setNumber(QStringLiteral("1234"));
+        client.trigger();
+
+        QTRY_VERIFY_WITH_TIMEOUT(events.contains(QStringLiteral("TRIG-recv")),
+                                 3000);
+        const int put = events.indexOf(QStringLiteral("PUT-resp"));
+        const int trig = events.indexOf(QStringLiteral("TRIG-recv"));
+        QVERIFY2(put >= 0, "the setNumber PUT response should have been sent");
+        QVERIFY2(trig > put,
+                 "trigger must be sent only AFTER the setNumber PUT completes");
     }
 };
 

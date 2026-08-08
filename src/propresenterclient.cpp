@@ -136,6 +136,7 @@ void ProPresenterClient::ensureMessage()
         stale->abort();
     }
 
+    qInfo().noquote() << "[ProPresenter] GET messages (ensure) ->" << apiBase();
     QNetworkReply *reply = m_nam.get(jsonRequest(apiBase() + "/v1/messages"));
     m_ensureReply = reply;
     connect(reply, &QNetworkReply::finished, this, [this, reply] {
@@ -145,8 +146,11 @@ void ProPresenterClient::ensureMessage()
         if (reply->error() != QNetworkReply::NoError) {
             // A deliberate abort from a reconnect() re-entry is not a failure:
             // the superseding ensure reports its own outcome.
-            if (reply->error() == QNetworkReply::OperationCanceledError)
+            if (reply->error() == QNetworkReply::OperationCanceledError) {
+                qDebug().noquote()
+                    << "[ProPresenter] ensure aborted (superseded by reconnect)";
                 return;
+            }
             emit error(QStringLiteral("Failed to reach ProPresenter: %1")
                            .arg(reply->errorString()));
             emit disconnected();
@@ -159,8 +163,12 @@ void ProPresenterClient::ensureMessage()
         m_messageId = findMessageId(messages, kMessageName);
 
         if (m_messageId.isEmpty()) {
+            qInfo().noquote() << "[ProPresenter] connected; ProPager message not "
+                                 "found — creating it";
             createMessage(); // will clear on completion
         } else {
+            qInfo().noquote() << "[ProPresenter] connected; adopted existing "
+                                 "ProPager message" << pathId(m_messageId);
             clear(); // startup recovery: known-empty state
         }
     });
@@ -260,6 +268,8 @@ void ProPresenterClient::createMessage()
             const QJsonObject created =
                 QJsonDocument::fromJson(createReply->readAll()).object();
             m_messageId = created.value("id").toObject();
+            qInfo().noquote() << "[ProPresenter] created ProPager message"
+                              << pathId(m_messageId);
             clear(); // startup recovery on the freshly created message
         });
     });
@@ -274,13 +284,29 @@ void ProPresenterClient::setNumber(const QString &number)
     // PUT the Decision-4 body with an empty theme (theme is fixed at creation).
     const QJsonObject body = buildMessageBody(
         kMessageName, number, QJsonObject{{"name", ""}, {"uuid", ""}, {"index", 0}});
+    qInfo().noquote() << "[ProPresenter] PUT number" << number << "->"
+                      << messagePath();
     QNetworkReply *reply = m_nam.put(jsonRequest(messagePath()),
                                      QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+    m_setReply = reply;
+    connect(reply, &QNetworkReply::finished, this, [this, reply, number] {
+        if (m_setReply == reply)
+            m_setReply = nullptr;
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
+            // The number never landed — do not show a stale value. Drop any
+            // trigger that was waiting on this PUT.
+            m_triggerPending = false;
             emit error(QStringLiteral("Failed to set number: %1")
                            .arg(reply->errorString()));
+            return;
+        }
+        qDebug().noquote() << "[ProPresenter] number set OK:" << number;
+        // The text has now landed; issue the trigger that was held back so
+        // ProPresenter shows THIS number rather than the previous one.
+        if (m_triggerPending) {
+            m_triggerPending = false;
+            sendTrigger();
         }
     });
 }
@@ -291,10 +317,26 @@ void ProPresenterClient::trigger()
         emit error(QStringLiteral("Cannot trigger: ProPager message not ready"));
         return;
     }
+    // If a setNumber() PUT is still in flight, hold the trigger until it lands.
+    // Firing now would race the PUT on the wire and ProPresenter would show the
+    // previously-set number (the live bug this guards against). The PUT's
+    // finished handler issues the held trigger via sendTrigger().
+    if (m_setReply) {
+        qDebug().noquote()
+            << "[ProPresenter] trigger deferred until pending PUT completes";
+        m_triggerPending = true;
+        return;
+    }
+    sendTrigger();
+}
+
+void ProPresenterClient::sendTrigger()
+{
     // POST /v1/message/{id}/trigger (confirmed method — not GET). The optional
     // token-override body is empty; the message shows with its current tokens.
     // Success is 204 No Content: treat any non-error reply as success and do
     // not parse a body.
+    qInfo().noquote() << "[ProPresenter] POST trigger ->" << messagePath();
     QNetworkReply *reply = m_nam.post(jsonRequest(messagePath() + "/trigger"),
                                       QByteArray("[]"));
     connect(reply, &QNetworkReply::finished, this, [this, reply] {
@@ -302,7 +344,9 @@ void ProPresenterClient::trigger()
         if (reply->error() != QNetworkReply::NoError) {
             emit error(QStringLiteral("Failed to trigger message: %1")
                            .arg(reply->errorString()));
+            return;
         }
+        qDebug().noquote() << "[ProPresenter] trigger OK";
     });
 }
 
@@ -314,12 +358,15 @@ void ProPresenterClient::clear()
     }
     // GET /v1/message/{id}/clear — per-message clear (Decision 5), 204 on
     // success. Never the layer-wide /v1/clear/layer/messages.
+    qInfo().noquote() << "[ProPresenter] GET clear ->" << messagePath();
     QNetworkReply *reply = m_nam.get(jsonRequest(messagePath() + "/clear"));
     connect(reply, &QNetworkReply::finished, this, [this, reply] {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
             emit error(QStringLiteral("Failed to clear message: %1")
                            .arg(reply->errorString()));
+            return;
         }
+        qDebug().noquote() << "[ProPresenter] clear OK";
     });
 }

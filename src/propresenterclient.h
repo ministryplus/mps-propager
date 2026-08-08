@@ -120,6 +120,7 @@ private:
     QString apiBase() const;
     QString messagePath() const; // "http://.../v1/message/{id}"
     void createMessage();        // POST /v1/messages after ensure fails to find
+    void sendTrigger();          // POST /v1/message/{id}/trigger (the wire call)
 
     const Config &m_config;
     QNetworkAccessManager m_nam;
@@ -128,6 +129,14 @@ private:
     // re-entry can abort it (no leaked reply, no double-resolve). Cleared when
     // the reply finishes or is aborted.
     QPointer<QNetworkReply> m_ensureReply;
+    // In-flight PUT from setNumber(), tracked so trigger() can defer until the
+    // number text has actually landed. The PUT and the trigger POST otherwise
+    // race on the wire and ProPresenter shows the PREVIOUS number. Cleared when
+    // the PUT finishes.
+    QPointer<QNetworkReply> m_setReply;
+    // A trigger() arrived while a setNumber() PUT was still in flight; the POST
+    // is held until that PUT completes, then issued from its finished handler.
+    bool m_triggerPending = false;
 };
 
 #endif // PROPAGER_PROPRESENTERCLIENT_H
