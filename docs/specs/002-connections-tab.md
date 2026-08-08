@@ -1,7 +1,7 @@
 # Spec 002: Connections Tab — In-App Config, Validation & Reconnect
 
 **Date:** 2026-08-07
-**Status:** Draft
+**Status:** Complete
 **Branch:** `master`
 
 ## Goals / Objective
@@ -179,6 +179,10 @@ Add a **Reveal Config File** affordance alongside the existing *Reveal Log File*
 
 - **#4 — manual Clear button** — dropped from this spec. It's a pager runtime action (wraps `PagerController::cancel()`), not a connection concern; belongs on Overview + tray in its own issue.
 - **#2 — deep ProPresenter preflight** (slide-label + message-shape checks) — out of scope; the Test button does reachability only and is built as the seam #2 extends later. #2 still owns the unresolved `vk`-vs-`propager` labelling decision.
+  - **Learned during 002 live testing (fold into #2 when spec'd):** per-page display now shows the number by triggering with a **token override** (`POST /v1/message/{id}/trigger` body `[{"name":"Number","text":{"text":"<n>"}}]`, shape confirmed against the OpenAPI trigger schema) and issues **no per-page PUT** — a per-page PUT re-rendered the message and flashed stale content (the previous number, or a token UUID) before the correct value appeared. Consequence: the override only renders if the receiving **ProPager message already carries the `{Number}` token** in its text. So #2's preflight should:
+    - **Verify (read):** `GET /v1/messages` (already in `test()`) → confirm the adopted message's text contains `{Number}` and a token named `Number`; report via new structured `TestResult` fields (e.g. `templateOk`/`tokenOk`) — the struct is the seam.
+    - **Correct (write):** normalize a wrong/hand-made message with `PUT /v1/message/{id}` using our known-good body. Two constraints: **Test must stay side-effect-free (Decision 10)** — so the PUT belongs on connect/adopt (a one-time normalize in `ensureMessage`) or behind an explicit "Fix message" button, **not** in Test; and **PUT replaces the whole body incl. theme**, so the normalize must reuse `pickTheme` to avoid stomping the operator's chosen theme.
+  - **Layer-status polling** (`GET /v1/status/layers`) exists and reports whether the messages layer is showing (but not *which* message). Noted as a possible #2/UI input (e.g. detect an external clear), but **deferred** — it reintroduces polling, which Spec 001 Decision 7 deliberately avoids, so it needs its own decision when #2 is spec'd.
 - **#3 — setup docs + Help menu** — separate issue. This spec shifts config guidance *toward* the UI and those docs (Decision 2) but does not write them.
 - **In-app Slack channel picker/dropdown for `listen-channel`** — kept a text field. `SlackClient` already has `listChannels()`/`fetchChannelList` plumbing, so a dropdown is a cheap follow-up, but it isn't required to close #1/#5.
 - **Comment-preserving `.ini` serializer / surgical line-edit** — rejected (Decision 2); the `.ini` is app-owned.

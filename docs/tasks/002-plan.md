@@ -1,7 +1,7 @@
 # Plan 002: Connections Tab — In-App Config, Validation & Reconnect
 
 **Spec:** [002 — Connections Tab](../specs/002-connections-tab.md)
-**Status:** Pending
+**Status:** Complete
 **Date:** 2026-08-07
 
 ## Overview

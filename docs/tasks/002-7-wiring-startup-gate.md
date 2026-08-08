@@ -1,7 +1,6 @@
 # Task 002-7: Wiring & Startup Validation Gate (main.cpp)
 
 **Spec:** [002 — Connections Tab](../specs/002-connections-tab.md)
-**Status:** Pending
 **Status:** Complete
 **Parallel group:** Wave 4 (solo — sole editor of main.cpp; final integration)
 **Depends on:** [002-1](002-1-config-api.md), [002-2](002-2-controller-live-reload.md), [002-3](002-3-reconnect-entry-points.md), [002-5](002-5-mainwindow-tab-banner.md), [002-6](002-6-tray-reconnect-warning.md)
