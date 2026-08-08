@@ -13,10 +13,10 @@
 # ────────────────────────────────────────────────────────────────────────────
 #
 # Prerequisites (provided by the operator, not the repo):
-#   * A "Developer ID Application" certificate for the com.isaacwiebe org in the
+#   * A "Developer ID Application: Isaac Wiebe (S8KL27Z2X8)" certificate in the
 #     login keychain  (override the identity via  DEV_ID=...).
-#   * A stored notarytool credential profile:
-#         xcrun notarytool store-credentials propager-notary \
+#   * A stored notarytool credential profile named "NOTARY_PWD":
+#         xcrun notarytool store-credentials NOTARY_PWD \
 #             --apple-id "<you@example.com>" --team-id "<TEAMID>" \
 #             --password "<app-specific-password>"
 #     (override the profile name via  NOTARY_PROFILE=...).
@@ -30,8 +30,8 @@ QT_DIR="${QT_DIR:-$HOME/src/Qt/6.8.3/macos}"                        # online-ins
 CMAKE="${CMAKE:-$HOME/src/Qt/Tools/CMake/CMake.app/Contents/bin/cmake}"
 BUILD_DIR="${BUILD_DIR:-$REPO_ROOT/build/release}"
 DIST_DIR="${DIST_DIR:-$REPO_ROOT/dist}"
-DEV_ID="${DEV_ID:-Developer ID Application}"                        # com.isaacwiebe org cert
-NOTARY_PROFILE="${NOTARY_PROFILE:-propager-notary}"
+DEV_ID="${DEV_ID:-Developer ID Application: Isaac Wiebe (S8KL27Z2X8)}" # signing identity
+NOTARY_PROFILE="${NOTARY_PROFILE:-NOTARY_PWD}"                      # stored notarytool keychain profile
 ENTITLEMENTS="${ENTITLEMENTS:-$REPO_ROOT/entitlements.plist}"
 APP_NAME="ProPager"
 DMG_PATH="$DIST_DIR/${APP_NAME}.dmg"
@@ -71,6 +71,15 @@ log "Deployed bundle: $APP"
 
 # ── 4. Codesign inside-out: nested code FIRST, .app LAST ─────────────────────
 #     Hardened runtime (--options runtime) + secure timestamp on everything.
+#
+#     entitlements.plist is an intentionally EMPTY dict — this native Qt6/C++
+#     binary needs no extra capabilities. It deliberately omits the two
+#     exceptions the OLD Python app required (allow-unsigned-executable-memory,
+#     disable-library-validation): those existed only for the embedded, JITing
+#     Python interpreter, and adding them back would weaken the hardened runtime
+#     for no benefit. NOTE: keep entitlements.plist comment-free — codesign's
+#     entitlements parser (AMFIUnserializeXML) rejects XML comments with a
+#     "syntax error" even though `plutil -lint` accepts them.
 sign() { codesign --force --options runtime --timestamp \
                   --entitlements "$ENTITLEMENTS" --sign "$DEV_ID" "$@"; }
 
@@ -102,7 +111,14 @@ rm -f "$DMG_PATH"
 /usr/bin/hdiutil create -volname "$APP_NAME" -srcfolder "$APP" \
     -ov -format UDZO "$DMG_PATH"
 
-# ── 8. Staple the .dmg (staple BOTH the .app and the .dmg) ───────────────────
+# ── 8. Notarize the .dmg, then staple it (staple BOTH the .app and the .dmg) ─
+#     The zip submitted in step 5 only gets the .app a ticket; the .dmg is a
+#     distinct artifact with its own hash and needs its OWN notarization or the
+#     staple fails with "Record not found" (Apple has no ticket for the dmg).
+#     The nested .app is already signed+stapled, so this pass is quick.
+log "Notarizing the .dmg…"
+xcrun notarytool submit "$DMG_PATH" --keychain-profile "$NOTARY_PROFILE" --wait
+
 log "Stapling the .dmg…"
 xcrun stapler staple "$DMG_PATH"
 

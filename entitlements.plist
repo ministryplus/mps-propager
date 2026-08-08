@@ -1,21 +1,4 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--
-  Minimal hardened-runtime entitlements for ProPager.
-
-  Deliberately absent:
-    * com.apple.security.cs.allow-unsigned-executable-memory
-    * com.apple.security.cs.disable-library-validation
-
-  Those two were only ever required by the OLD app, which embedded a Python
-  interpreter (Nuitka/PyInstaller) that JITs and loads unsigned/third-party
-  dylibs. This is a native Qt6/C++ binary linked only against the notarized
-  Qt frameworks we ship inside the bundle, so neither exception is needed.
-  Adding them back would only weaken the hardened runtime for no benefit.
-
-  An empty (but present) entitlements file is intentional: codesign still
-  applies the hardened runtime via `--options runtime`; we simply grant no
-  additional capabilities.
--->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
