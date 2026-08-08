@@ -2,6 +2,7 @@
 
 #include <QHostAddress>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QString>
 #include <QTcpServer>
@@ -247,20 +248,18 @@ private slots:
         QCOMPARE(disconnects, 1);
     }
 
-    // Regression (live bug): a page displayed the PREVIOUS number first and then
-    // updated to the new one, because trySend() fired setNumber() (PUT) and
-    // trigger() (POST) back-to-back and they raced on the wire — the trigger
-    // frequently reached ProPresenter before the PUT text was applied. trigger()
-    // must therefore defer until the in-flight setNumber() PUT has completed, so
-    // ProPresenter shows the number that was just set, never the stale one.
-    //
-    // Proven with a stub HTTP server that DELAYS the PUT response: with correct
-    // sequencing the /trigger request arrives only AFTER the PUT response is
-    // sent. A concurrent (buggy) trigger would arrive first.
-    void trigger_deferredUntilSetNumberPutCompletes()
+    // Regression (live bug): a page briefly displayed stale content (the previous
+    // number, or a token UUID) before the correct value appeared. Root cause: the
+    // display path issued a per-page PUT *and* a trigger — the PUT re-renders the
+    // message definition, flashing unresolved content, before the trigger shows
+    // it. ProPresenter's documented model carries the value IN the trigger, so
+    // the number must travel as a token override on POST /v1/message/{id}/trigger
+    // (body shape [{name, text:{text}}], confirmed against the OpenAPI spec) and
+    // NO per-page PUT should be issued.
+    void trigger_carriesNumberToken_andIssuesNoPerPagePut()
     {
-        QStringList events;               // ordered server-side milestones
-        constexpr int kPutDelayMs = 150;  // hold the PUT response to force a race
+        QStringList methods;    // request lines the server saw (per page action)
+        QByteArray triggerBody; // captured POST .../trigger request body
 
         QTcpServer server;
         QVERIFY(server.listen(QHostAddress::LocalHost));
@@ -272,42 +271,55 @@ private slots:
                 connect(sock, &QObject::destroyed, [buf] { delete buf; });
                 connect(sock, &QTcpSocket::disconnected, sock,
                         &QObject::deleteLater);
-                connect(sock, &QTcpSocket::readyRead, sock, [&events, sock, buf] {
-                    buf->append(sock->readAll());
-                    if (!buf->contains("\r\n\r\n"))
-                        return; // wait for the full header block
-                    const QByteArray reqLine = buf->left(buf->indexOf("\r\n"));
-                    buf->clear();
-                    const auto send204 = [sock] {
-                        sock->write("HTTP/1.1 204 No Content\r\n"
-                                    "Content-Length: 0\r\n\r\n");
-                        sock->flush();
-                    };
-                    if (reqLine.startsWith("GET")
-                        && reqLine.contains("/v1/messages")) {
-                        // ensureMessage(): return the ProPager message so an id
-                        // resolves and setNumber()/trigger() proceed.
-                        const QByteArray body =
-                            "[{\"id\":{\"name\":\"ProPager\",\"uuid\":\"msg1\","
-                            "\"index\":0}}]";
-                        sock->write("HTTP/1.1 200 OK\r\n"
-                                    "Content-Type: application/json\r\n"
-                                    "Content-Length: "
-                                    + QByteArray::number(body.size())
-                                    + "\r\n\r\n" + body);
-                        sock->flush();
-                    } else if (reqLine.contains("/trigger")) {
-                        events << QStringLiteral("TRIG-recv");
-                        send204();
-                    } else if (reqLine.startsWith("PUT")) {
-                        QTimer::singleShot(kPutDelayMs, sock, [&events, send204] {
-                            events << QStringLiteral("PUT-resp");
-                            send204();
+                connect(sock, &QTcpSocket::readyRead, sock,
+                        [&methods, &triggerBody, sock, buf] {
+                            buf->append(sock->readAll());
+                            const int headerEnd = buf->indexOf("\r\n\r\n");
+                            if (headerEnd < 0)
+                                return; // await the full header block
+                            // Body-aware: hold until the whole body has arrived.
+                            int contentLength = 0;
+                            for (const QByteArray &h :
+                                 buf->left(headerEnd).split('\n')) {
+                                const QByteArray line = h.trimmed().toLower();
+                                if (line.startsWith("content-length:"))
+                                    contentLength =
+                                        line.mid(15).trimmed().toInt();
+                            }
+                            if (buf->size() < headerEnd + 4 + contentLength)
+                                return;
+                            const QByteArray reqLine =
+                                buf->left(buf->indexOf("\r\n"));
+                            const QByteArray body =
+                                buf->mid(headerEnd + 4, contentLength);
+                            buf->clear();
+                            const auto send204 = [sock] {
+                                sock->write("HTTP/1.1 204 No Content\r\n"
+                                            "Content-Length: 0\r\n\r\n");
+                                sock->flush();
+                            };
+                            if (reqLine.startsWith("GET")
+                                && reqLine.contains("/v1/messages")) {
+                                const QByteArray msg =
+                                    "[{\"id\":{\"name\":\"ProPager\",\"uuid\":"
+                                    "\"msg1\",\"index\":0}}]";
+                                sock->write("HTTP/1.1 200 OK\r\n"
+                                            "Content-Type: application/json\r\n"
+                                            "Content-Length: "
+                                            + QByteArray::number(msg.size())
+                                            + "\r\n\r\n" + msg);
+                                sock->flush();
+                            } else if (reqLine.contains("/trigger")) {
+                                methods << QStringLiteral("TRIGGER");
+                                triggerBody = body;
+                                send204();
+                            } else if (reqLine.startsWith("PUT")) {
+                                methods << QStringLiteral("PUT");
+                                send204();
+                            } else {
+                                send204(); // startup clear
+                            }
                         });
-                    } else {
-                        send204(); // startup clear (GET .../clear) and the rest
-                    }
-                });
             }
         });
 
@@ -328,13 +340,21 @@ private slots:
         client.setNumber(QStringLiteral("1234"));
         client.trigger();
 
-        QTRY_VERIFY_WITH_TIMEOUT(events.contains(QStringLiteral("TRIG-recv")),
-                                 3000);
-        const int put = events.indexOf(QStringLiteral("PUT-resp"));
-        const int trig = events.indexOf(QStringLiteral("TRIG-recv"));
-        QVERIFY2(put >= 0, "the setNumber PUT response should have been sent");
-        QVERIFY2(trig > put,
-                 "trigger must be sent only AFTER the setNumber PUT completes");
+        QTRY_VERIFY_WITH_TIMEOUT(!triggerBody.isEmpty(), 3000);
+
+        // The trigger carries the number as a token override, correct shape.
+        const QJsonArray tokens = QJsonDocument::fromJson(triggerBody).array();
+        QVERIFY2(!tokens.isEmpty(),
+                 "trigger body must carry the token override array");
+        const QJsonObject token = tokens.first().toObject();
+        QCOMPARE(token.value("name").toString(), QString("Number"));
+        QCOMPARE(token.value("text").toObject().value("text").toString(),
+                 QString("1234"));
+
+        // No per-page PUT: the value travels in the trigger, so a page never
+        // re-renders the definition (the flash's root cause).
+        QVERIFY2(!methods.contains(QStringLiteral("PUT")),
+                 "the per-page display path must not issue a PUT");
     }
 };
 

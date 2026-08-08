@@ -19,13 +19,17 @@ class QNetworkReply;
 //
 // On startup the client ensures a Message named "ProPager" exists (find or
 // create), stores its returned id object, and drives that single message
-// through set -> trigger -> clear, always scoped to the stored id.
+// through trigger -> clear, always scoped to the stored id. The number to show
+// travels as a token override on the trigger (ProPresenter's documented model),
+// so there is no per-page PUT — a per-page PUT re-rendered the message and
+// flashed stale content before the correct value appeared.
 //
 // Endpoints (confirmed against the ProPresenter OpenAPI spec at
 // openapi.propresenter.com — closes Open TODO 1):
-//   PUT  /v1/message/{id}          set the token text (Decision 4 body)
-//   POST /v1/message/{id}/trigger  show the message (204 No Content on success)
-//   GET  /v1/message/{id}/clear    hide ONLY this message (per-message, 204)
+//   POST /v1/messages             create the ProPager message when absent
+//   POST /v1/message/{id}/trigger show the message with the number as a token
+//                                 override (body [{name,text:{text}}], 204)
+//   GET  /v1/message/{id}/clear   hide ONLY this message (per-message, 204)
 // The layer-wide GET /v1/clear/layer/messages is deliberately NOT used
 // (Decision 5) so ProPager coexists with a tech's other messages.
 class ProPresenterClient : public QObject
@@ -41,8 +45,9 @@ public:
     static QString apiBase(const QString &host, int port);
 
     // Decision-4 message body for the message named `name`, showing `number`,
-    // with the given `theme` id-object embedded. Used for both PUT (theme left
-    // empty) and POST /v1/messages create (theme from pickTheme).
+    // with the given `theme` id-object embedded. Used by POST /v1/messages to
+    // create the message (theme from pickTheme); per-page display then overrides
+    // the number via the trigger token, so the created `number` is a placeholder.
     static QJsonObject buildMessageBody(const QString &name,
                                         const QString &number,
                                         const QJsonObject &theme);
@@ -89,9 +94,14 @@ public slots:
     // Find or create the "ProPager" message, store its id, then clear it so the
     // app launches from a known-empty state (startup recovery, Decision 5).
     virtual void ensureMessage();
-    // PUT the number onto the stored message (does not show it).
+    // Record the number to display next. The value is carried in the following
+    // trigger() as a token override (ProPresenter's documented model), so this
+    // issues NO network call and no per-page PUT — a per-page PUT re-renders the
+    // message and flashed stale content before the correct value appeared.
     virtual void setNumber(const QString &number);
-    // POST trigger: show the stored message.
+    // POST /v1/message/{id}/trigger with the recorded number as a token override,
+    // showing the message with the correct value atomically (no separate PUT to
+    // race or re-render).
     virtual void trigger();
     // GET clear: hide only the stored message.
     virtual void clear();
@@ -120,7 +130,6 @@ private:
     QString apiBase() const;
     QString messagePath() const; // "http://.../v1/message/{id}"
     void createMessage();        // POST /v1/messages after ensure fails to find
-    void sendTrigger();          // POST /v1/message/{id}/trigger (the wire call)
 
     const Config &m_config;
     QNetworkAccessManager m_nam;
@@ -129,14 +138,9 @@ private:
     // re-entry can abort it (no leaked reply, no double-resolve). Cleared when
     // the reply finishes or is aborted.
     QPointer<QNetworkReply> m_ensureReply;
-    // In-flight PUT from setNumber(), tracked so trigger() can defer until the
-    // number text has actually landed. The PUT and the trigger POST otherwise
-    // race on the wire and ProPresenter shows the PREVIOUS number. Cleared when
-    // the PUT finishes.
-    QPointer<QNetworkReply> m_setReply;
-    // A trigger() arrived while a setNumber() PUT was still in flight; the POST
-    // is held until that PUT completes, then issued from its finished handler.
-    bool m_triggerPending = false;
+    // The number most recently handed to setNumber(); trigger() sends it as a
+    // token override so the displayed value is atomic and correct.
+    QString m_currentNumber;
 };
 
 #endif // PROPAGER_PROPRESENTERCLIENT_H

@@ -281,34 +281,12 @@ void ProPresenterClient::setNumber(const QString &number)
         emit error(QStringLiteral("Cannot set number: ProPager message not ready"));
         return;
     }
-    // PUT the Decision-4 body with an empty theme (theme is fixed at creation).
-    const QJsonObject body = buildMessageBody(
-        kMessageName, number, QJsonObject{{"name", ""}, {"uuid", ""}, {"index", 0}});
-    qInfo().noquote() << "[ProPresenter] PUT number" << number << "->"
-                      << messagePath();
-    QNetworkReply *reply = m_nam.put(jsonRequest(messagePath()),
-                                     QJsonDocument(body).toJson(QJsonDocument::Compact));
-    m_setReply = reply;
-    connect(reply, &QNetworkReply::finished, this, [this, reply, number] {
-        if (m_setReply == reply)
-            m_setReply = nullptr;
-        reply->deleteLater();
-        if (reply->error() != QNetworkReply::NoError) {
-            // The number never landed — do not show a stale value. Drop any
-            // trigger that was waiting on this PUT.
-            m_triggerPending = false;
-            emit error(QStringLiteral("Failed to set number: %1")
-                           .arg(reply->errorString()));
-            return;
-        }
-        qDebug().noquote() << "[ProPresenter] number set OK:" << number;
-        // The text has now landed; issue the trigger that was held back so
-        // ProPresenter shows THIS number rather than the previous one.
-        if (m_triggerPending) {
-            m_triggerPending = false;
-            sendTrigger();
-        }
-    });
+    // Record only — the value travels in the next trigger() as a token override
+    // (ProPresenter's documented way to show a message with dynamic text). A
+    // per-page PUT re-renders the message and flashed stale content before the
+    // correct value appeared, so it is deliberately not issued here.
+    m_currentNumber = number;
+    qDebug().noquote() << "[ProPresenter] number recorded:" << number;
 }
 
 void ProPresenterClient::trigger()
@@ -317,28 +295,17 @@ void ProPresenterClient::trigger()
         emit error(QStringLiteral("Cannot trigger: ProPager message not ready"));
         return;
     }
-    // If a setNumber() PUT is still in flight, hold the trigger until it lands.
-    // Firing now would race the PUT on the wire and ProPresenter would show the
-    // previously-set number (the live bug this guards against). The PUT's
-    // finished handler issues the held trigger via sendTrigger().
-    if (m_setReply) {
-        qDebug().noquote()
-            << "[ProPresenter] trigger deferred until pending PUT completes";
-        m_triggerPending = true;
-        return;
-    }
-    sendTrigger();
-}
-
-void ProPresenterClient::sendTrigger()
-{
-    // POST /v1/message/{id}/trigger (confirmed method — not GET). The optional
-    // token-override body is empty; the message shows with its current tokens.
-    // Success is 204 No Content: treat any non-error reply as success and do
-    // not parse a body.
-    qInfo().noquote() << "[ProPresenter] POST trigger ->" << messagePath();
-    QNetworkReply *reply = m_nam.post(jsonRequest(messagePath() + "/trigger"),
-                                      QByteArray("[]"));
+    // POST /v1/message/{id}/trigger with the number as a token override so the
+    // shown value is correct atomically — no separate PUT to race or re-render.
+    // Body shape per the ProPresenter OpenAPI trigger schema: an array of
+    // { name, text: { text } } token objects. Success is 204 No Content.
+    const QJsonArray tokens{QJsonObject{
+        {"name", kTokenName}, {"text", QJsonObject{{"text", m_currentNumber}}}}};
+    qInfo().noquote() << "[ProPresenter] POST trigger number" << m_currentNumber
+                      << "->" << messagePath();
+    QNetworkReply *reply =
+        m_nam.post(jsonRequest(messagePath() + "/trigger"),
+                   QJsonDocument(tokens).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, this, [this, reply] {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
