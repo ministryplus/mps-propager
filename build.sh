@@ -26,7 +26,7 @@ set -euo pipefail
 
 # ── Tunables (override via env) ─────────────────────────────────────────────
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-QT_DIR="${QT_DIR:-$HOME/src/Qt/6.11.1/macos}"                       # online-installer Qt (universal2)
+QT_DIR="${QT_DIR:-$HOME/src/Qt/6.8.3/macos}"                        # online-installer Qt 6.8 LTS (universal2; minos 12.0)
 CMAKE="${CMAKE:-$HOME/src/Qt/Tools/CMake/CMake.app/Contents/bin/cmake}"
 BUILD_DIR="${BUILD_DIR:-$REPO_ROOT/build/release}"
 DIST_DIR="${DIST_DIR:-$REPO_ROOT/dist}"

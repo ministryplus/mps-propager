@@ -1,5 +1,12 @@
 cmake_minimum_required(VERSION 3.21)
 
+# Minimum macOS is macOS 12 (Monterey). This is the binding compatibility floor
+# and MUST be set before project() so it applies to the whole build. It matches
+# the Qt 6.8 LTS frameworks we link against (their own minos is 12.0); targeting
+# anything older would fail to load them. Bumping this requires a Qt that still
+# supports the older OS (e.g. Qt 6.5 LTS for macOS 11).
+set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS version")
+
 project(ProPager LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)

@@ -7,8 +7,11 @@ Run `./build.sh` to produce a signed, notarized, stapled `ProPager.dmg`.
   binaries are **universal2** (x86_64 + arm64). **Homebrew Qt is single-arch and
   MUST NOT be used for release builds** — a Homebrew-linked binary can't be
   universal2 and will fail the `lipo -archs` check. `build.sh` points CMake at
-  the online-installer Qt (default `~/src/Qt/6.11.1/macos`, override via
+  the online-installer Qt (default `~/src/Qt/6.8.3/macos`, override via
   `QT_DIR=`).
+* **Minimum macOS: 12 (Monterey).** Set by `CMAKE_OSX_DEPLOYMENT_TARGET` in
+  `CMakeLists.txt` and bounded by Qt 6.8 LTS (its frameworks' `minos` is 12.0).
+  Targeting macOS 11 would require Qt 6.5 LTS instead.
 * Requires a `Developer ID Application` cert (com.isaacwiebe) in the keychain
   and a stored `notarytool` credential profile — see the header of `build.sh`.
 
