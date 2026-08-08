@@ -70,8 +70,8 @@ qt_add_resources(ProPager "menubar"
 set_target_properties(ProPager PROPERTIES
     MACOSX_BUNDLE_BUNDLE_NAME "ProPager"
     MACOSX_BUNDLE_GUI_IDENTIFIER "com.isaacwiebe.propager"
-    MACOSX_BUNDLE_BUNDLE_VERSION "0.1.0"
-    MACOSX_BUNDLE_SHORT_VERSION_STRING "0.1.0"
+    MACOSX_BUNDLE_BUNDLE_VERSION "0.5.0"
+    MACOSX_BUNDLE_SHORT_VERSION_STRING "0.5.0"
     MACOSX_BUNDLE_ICON_FILE "propager.icns"
 )
 
