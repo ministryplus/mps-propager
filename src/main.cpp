@@ -5,6 +5,7 @@
 #include <QLoggingCategory>
 #include <QMutex>
 #include <QTextStream>
+#include <QTime>
 
 #include "config.h"
 #include "logbroker.h"
@@ -27,7 +28,7 @@ void messageHandler(QtMsgType type, const QMessageLogContext &, const QString &m
 {
     QMutexLocker locker(&g_logMutex);
 
-    const QString line = LogBroker::formatLine(type, msg);
+    const QString line = LogBroker::formatLine(type, msg, QTime::currentTime());
 
     // Always echo to stderr so a dev launch still shows output.
     QTextStream(stderr) << line << '\n';

@@ -2,6 +2,7 @@
 
 #include <QList>
 #include <QString>
+#include <QTime>
 
 #include "config.h"
 #include "logbroker.h"
@@ -79,15 +80,18 @@ private slots:
 
     // Warnings/criticals map to the WARN/ERROR levels the Log tab shows so a
     // ProPresenter/Slack failure reads as actionable text, not a dead modal.
+    // Each line is prefixed with a millisecond clock stamp (no date) so delays
+    // between entries are visible; the time is passed in to keep formatLine pure.
     void logLine_levelPrefixes()
     {
+        const QTime t(9, 8, 7, 123);
         QCOMPARE(LogBroker::formatLine(QtWarningMsg,
-                                       QStringLiteral("[slack] disconnected")),
-                 QString("[WARN] [slack] disconnected"));
-        QCOMPARE(LogBroker::formatLine(QtCriticalMsg, QStringLiteral("boom")),
-                 QString("[ERROR] boom"));
-        QCOMPARE(LogBroker::formatLine(QtInfoMsg, QStringLiteral("hi")),
-                 QString("[INFO] hi"));
+                                       QStringLiteral("[slack] disconnected"), t),
+                 QString("[09:08:07.123] [WARN] [slack] disconnected"));
+        QCOMPARE(LogBroker::formatLine(QtCriticalMsg, QStringLiteral("boom"), t),
+                 QString("[09:08:07.123] [ERROR] boom"));
+        QCOMPARE(LogBroker::formatLine(QtInfoMsg, QStringLiteral("hi"), t),
+                 QString("[09:08:07.123] [INFO] hi"));
     }
 
     // --- TrayMenu::warningTooltip (Task 002-6 warning-state precedence) -----
