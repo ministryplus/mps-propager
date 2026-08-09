@@ -136,24 +136,49 @@ private slots:
                        const QString &channel);
 
 private:
-    void openConnection();          // POST apps.connections.open
+    // Hard (re)connect: POST apps.connections.open, then open a socket as the
+    // new active connection. Used by start(), the backoff timer, reconnectNow().
+    void openConnection();
+    // Graceful "make-before-break" refresh (Slack `disconnect` frame): open a
+    // *second* socket alongside the live one; the old one is retired only once
+    // the replacement is confirmed live (its `hello`), so no inbound message is
+    // dropped in a reconnect gap. This is why we roll two sockets, not one.
+    void beginGracefulReconnect();
+    // Shared handshake: POST apps.connections.open and, on success, open a
+    // socket into m_socket (graceful=false) or m_pending (graceful=true).
+    void requestConnection(bool graceful);
     void scheduleReconnect();       // backoff + re-run openConnection
-    void onTextMessageReceived(const QString &frame);
+
+    // Allocate a socket parented to this and wire its lifecycle signals through
+    // the per-socket handlers (the handlers branch on which socket fired).
+    QWebSocket *makeSocket();
+    // Close and delete a socket after detaching its signals from us, so its
+    // shutdown does NOT reach onSocketDisconnected (no reconnect, no status
+    // flap). Used when we intentionally drop a socket (promotion, reconnectNow).
+    void retireSocket(QWebSocket *sock);
+    // Adopt m_pending as the active connection and retire the previous one.
+    void promotePending();
+
+    // Per-socket lifecycle (a socket pointer identifies active vs pending).
+    void onSocketConnected(QWebSocket *sock);
+    void onSocketDisconnected(QWebSocket *sock);
+    void onSocketFrame(QWebSocket *sock, const QString &frame);
 
     const Config &m_config;
     PagerController *m_controller = nullptr;
     QString m_lastNumber; // most recent forwarded number, for `repeat`
     QNetworkAccessManager m_nam;
-    QWebSocket m_socket;
+    // The live connection, and (only during a graceful refresh) the incoming
+    // replacement awaiting its `hello`. Both nullptr means no socket. Parented
+    // to this, so they are cleaned up with the client.
+    QWebSocket *m_socket = nullptr;
+    QWebSocket *m_pending = nullptr;
     QTimer m_reconnectTimer;
     int m_backoffMs = 0;
-    // In-flight apps.connections.open reply, tracked so reconnectNow() can
-    // abort a pending handshake instead of leaking it.
+    // In-flight apps.connections.open reply, tracked so reconnectNow() (and a
+    // mid-handshake socket death) can abort a pending handshake instead of
+    // leaking it or letting it open a competing socket.
     QPointer<QNetworkReply> m_openReply;
-    // Set while reconnectNow() intentionally closes a healthy socket, so the
-    // disconnected handler suppresses the automatic backoff reschedule for
-    // that one close (reconnectNow drives the reopen itself).
-    bool m_manualClose = false;
 };
 
 #endif // PROPAGER_SLACKCLIENT_H

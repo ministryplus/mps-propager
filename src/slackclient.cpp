@@ -60,30 +60,49 @@ SlackClient::SlackClient(const Config &config, PagerController *controller,
                 [react](const QString &ts) { react("thumbsup", ts); });
     }
 
-    connect(&m_socket, &QWebSocket::connected, this, [this] {
-        m_backoffMs = 0; // healthy connection resets backoff
-        qInfo() << "[slack] Socket Mode connected";
-        emit connected();
-    });
-    connect(&m_socket, &QWebSocket::disconnected, this, [this] {
-        qWarning() << "[slack] Socket Mode disconnected";
-        emit disconnected();
-        // A close driven by reconnectNow() must not also arm the auto-backoff:
-        // reconnectNow reopens immediately, and a stray timer would open a
-        // second socket. Consume the flag and skip the reschedule once.
-        if (m_manualClose) {
-            m_manualClose = false;
-            return;
-        }
-        scheduleReconnect();
-    });
-    connect(&m_socket, &QWebSocket::textMessageReceived, this,
-            &SlackClient::onTextMessageReceived);
-    connect(&m_socket, &QWebSocket::errorOccurred, this,
-            [this](QAbstractSocket::SocketError) {
+    // Per-socket lifecycle signals are wired in makeSocket(), because a graceful
+    // refresh runs two sockets at once and each handler must know which fired.
+}
+
+QWebSocket *SlackClient::makeSocket()
+{
+    auto *sock = new QWebSocket(QString(), QWebSocketProtocol::VersionLatest, this);
+    connect(sock, &QWebSocket::connected, this,
+            [this, sock] { onSocketConnected(sock); });
+    connect(sock, &QWebSocket::disconnected, this,
+            [this, sock] { onSocketDisconnected(sock); });
+    connect(sock, &QWebSocket::textMessageReceived, this,
+            [this, sock](const QString &frame) { onSocketFrame(sock, frame); });
+    connect(sock, &QWebSocket::errorOccurred, this,
+            [this, sock](QAbstractSocket::SocketError) {
                 emit error(QStringLiteral("Slack socket error: %1")
-                               .arg(m_socket.errorString()));
+                               .arg(sock->errorString()));
             });
+    return sock;
+}
+
+void SlackClient::retireSocket(QWebSocket *sock)
+{
+    if (!sock)
+        return;
+    // Detach first so the ensuing close does NOT reach onSocketDisconnected:
+    // a retired socket must not trigger a reconnect or flap the status light.
+    sock->disconnect(this);
+    sock->close();
+    sock->deleteLater();
+}
+
+void SlackClient::promotePending()
+{
+    if (!m_pending)
+        return;
+    qInfo() << "[slack] replacement connection live; retiring previous connection";
+    QWebSocket *old = m_socket; // may be nullptr if the old one died mid-handoff
+    m_socket = m_pending;
+    m_pending = nullptr;
+    retireSocket(old);
+    // The app was already "connected" throughout the handoff, so there is no
+    // status transition to emit — that is the whole point of make-before-break.
 }
 
 // --- Pure helpers -------------------------------------------------------
@@ -198,13 +217,6 @@ void SlackClient::reconnectNow()
     m_reconnectTimer.stop();
     m_backoffMs = 0;
 
-    // Safe-while-connected: tear down an existing/connecting socket so exactly
-    // one QWebSocket remains after the reopen. Suppress the auto-backoff for
-    // this intentional close (openConnection below drives the reopen).
-    if (m_socket.state() != QAbstractSocket::UnconnectedState) {
-        m_manualClose = true;
-        m_socket.close();
-    }
     // Abort a pending handshake reply so it is not leaked and cannot open a
     // second socket when it returns.
     if (m_openReply) {
@@ -212,6 +224,15 @@ void SlackClient::reconnectNow()
         m_openReply = nullptr;
         stale->abort();
     }
+    // Retire both the live socket and any in-flight graceful replacement so
+    // exactly one fresh socket remains after the reopen. retireSocket detaches
+    // signals first, so neither close reaches onSocketDisconnected (no stray
+    // backoff reschedule, no competing socket) — openConnection drives the
+    // reopen itself.
+    retireSocket(m_pending);
+    m_pending = nullptr;
+    retireSocket(m_socket);
+    m_socket = nullptr;
 
     qInfo() << "[slack] manual reconnect: reopening now (backoff reset)";
     openConnection();
@@ -219,24 +240,47 @@ void SlackClient::reconnectNow()
 
 void SlackClient::openConnection()
 {
+    requestConnection(/*graceful=*/false);
+}
+
+void SlackClient::beginGracefulReconnect()
+{
+    qInfo() << "[slack] disconnect requested by Slack; bringing up replacement "
+               "connection (make-before-break)";
+    requestConnection(/*graceful=*/true);
+}
+
+void SlackClient::requestConnection(bool graceful)
+{
     // POST apps.connections.open (app-level token) -> wss:// URL, then open the
     // socket. This replaces the slack-bolt Socket Mode handler (Decision 8).
+    // graceful=true opens the replacement (m_pending) while the current socket
+    // keeps running; graceful=false opens the active socket (m_socket) directly.
     qDebug() << "[slack] POST apps.connections.open (app-level token)";
     QNetworkReply *reply = m_nam.post(
         bearerJsonRequest(kConnectionsOpen, m_config.slackAppToken()),
         QByteArray());
     m_openReply = reply;
-    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, graceful] {
         if (m_openReply == reply)
             m_openReply = nullptr;
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
-            // A deliberate abort from reconnectNow() is not a failure: the
-            // superseding openConnection() reports its own outcome.
+            // A deliberate abort (reconnectNow, or an active-socket death during
+            // a graceful handshake) is not a failure: the superseding path
+            // reports its own outcome.
             if (reply->error() == QNetworkReply::OperationCanceledError)
                 return;
             emit error(QStringLiteral("apps.connections.open failed: %1")
                            .arg(reply->errorString()));
+            // A graceful handshake that fails leaves the live socket untouched;
+            // don't reconnect-storm. Slack will force-close it later, and that
+            // death drives the ordinary backoff reconnect.
+            if (graceful) {
+                qWarning() << "[slack] replacement handshake failed; keeping "
+                              "current connection";
+                return;
+            }
             scheduleReconnect();
             return;
         }
@@ -247,12 +291,24 @@ void SlackClient::openConnection()
         if (url.isEmpty()) {
             emit error(QStringLiteral("apps.connections.open returned no URL: %1")
                            .arg(resp.value("error").toString()));
+            if (graceful) {
+                qWarning() << "[slack] replacement handshake returned no URL; "
+                              "keeping current connection";
+                return;
+            }
             scheduleReconnect();
             return;
         }
 
-        qInfo() << "[slack] opening Socket Mode connection";
-        m_socket.open(QUrl(url));
+        QWebSocket *sock = makeSocket();
+        if (graceful) {
+            m_pending = sock;
+            qInfo() << "[slack] opening replacement Socket Mode connection";
+        } else {
+            m_socket = sock;
+            qInfo() << "[slack] opening Socket Mode connection";
+        }
+        sock->open(QUrl(url));
     });
 }
 
@@ -263,7 +319,60 @@ void SlackClient::scheduleReconnect()
     m_reconnectTimer.start(m_backoffMs);
 }
 
-void SlackClient::onTextMessageReceived(const QString &frame)
+void SlackClient::onSocketConnected(QWebSocket *sock)
+{
+    m_backoffMs = 0; // healthy connection resets backoff
+    if (sock == m_pending) {
+        // The replacement's WebSocket is up, but Slack hasn't confirmed the
+        // session yet. Promotion waits for its `hello` (onSocketFrame), so no
+        // message is missed in the tiny WS-open-to-hello window.
+        qInfo() << "[slack] replacement connection established; awaiting hello";
+        return;
+    }
+    qInfo() << "[slack] Socket Mode connected";
+    emit connected();
+}
+
+void SlackClient::onSocketDisconnected(QWebSocket *sock)
+{
+    if (sock == m_pending) {
+        // The replacement died before it could take over. The live socket is
+        // still serving, so this is invisible to the app unless it too is gone.
+        qWarning() << "[slack] replacement connection dropped before promotion";
+        m_pending = nullptr;
+        sock->deleteLater();
+        if (!m_socket) {
+            emit disconnected();
+            scheduleReconnect();
+        }
+        return;
+    }
+    if (sock == m_socket) {
+        qWarning() << "[slack] Socket Mode disconnected";
+        m_socket = nullptr;
+        sock->deleteLater();
+        if (m_pending) {
+            // A graceful replacement is already mid-handshake; let it promote
+            // rather than opening a competing socket, and don't flap status.
+            return;
+        }
+        // Cancel any in-flight graceful handshake so it can't open a stray
+        // socket that races the backoff reconnect below.
+        if (m_openReply) {
+            QNetworkReply *stale = m_openReply;
+            m_openReply = nullptr;
+            stale->abort();
+        }
+        emit disconnected();
+        scheduleReconnect();
+        return;
+    }
+    // A retired socket normally has its signals detached before close; this is
+    // only a defensive cleanup path.
+    sock->deleteLater();
+}
+
+void SlackClient::onSocketFrame(QWebSocket *sock, const QString &frame)
 {
     const QJsonObject envelope =
         QJsonDocument::fromJson(frame.toUtf8()).object();
@@ -271,13 +380,31 @@ void SlackClient::onTextMessageReceived(const QString &frame)
     const QString frameType = envelope.value("type").toString();
     qDebug().noquote() << "[slack] frame received, type=" << frameType;
 
-    // Ack first (Slack expects the ack before the event is acted on).
+    // Ack first (Slack expects the ack before the event is acted on). The ack
+    // MUST go back on the socket the frame arrived on — during a graceful
+    // handoff both sockets are briefly live.
     const QJsonObject ack = buildAck(envelope);
     if (!ack.isEmpty()) {
-        m_socket.sendTextMessage(
+        sock->sendTextMessage(
             QString::fromUtf8(QJsonDocument(ack).toJson(QJsonDocument::Compact)));
         qDebug().noquote() << "[slack] acked envelope"
                            << envelope.value("envelope_id").toString();
+    }
+
+    // Slack asks us to reconnect ahead of closing this connection. Bring up a
+    // replacement now, while this socket still delivers events. Only the live
+    // socket triggers it, and only when no handoff is already under way — Slack
+    // sends two disconnect frames (a warning, then refresh_requested).
+    if (frameType == QLatin1String("disconnect")) {
+        if (sock == m_socket && !m_pending && !m_openReply)
+            beginGracefulReconnect();
+        return;
+    }
+    // The replacement's session is confirmed live: take it over now.
+    if (frameType == QLatin1String("hello")) {
+        if (sock == m_pending)
+            promotePending();
+        return;
     }
 
     const QString listen = m_config.slackListenChannel();
