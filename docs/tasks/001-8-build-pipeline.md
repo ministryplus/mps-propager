@@ -80,9 +80,12 @@ subsequent versioned release.
    `LICENSE`, `LGPL-3.0.txt`, `GPL-3.0.txt`).
 4. [ ] **Tag** the release commit: `git tag -a v<version> -m "…"` →
    `git push origin v<version>`.
-5. [ ] **GitHub release:** `gh release create v<version> --draft`, attach
-   `dist/ProPager-<version>-<build>.dmg`, write notes → publish with
-   `gh release edit v<version> --draft=false`.
+5. [ ] **GitHub release:** `gh release create v<version> --draft`, attach the
+   dmg, write notes → publish with `gh release edit v<version> --draft=false`.
+   The on-disk artifact is `dist/ProPager-<version>-<build>.dmg` (the `<build>`
+   suffix keeps local builds from overwriting each other), but **trim it to
+   `ProPager-<version>.dmg` for the release asset** — the build number is a
+   local bookkeeping detail, not part of the published name.
 
 ### v0.5.0 — 2026-08-08 ✅ published
 
