@@ -73,7 +73,12 @@ log "Deployed bundle: $APP"
 # Name the .dmg with the bundle's version (single source of truth: CMakeLists).
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' \
     "$APP/Contents/Info.plist" 2>/dev/null)" || die "could not read version from Info.plist"
-DMG_PATH="$DIST_DIR/${APP_NAME}-${VERSION}.dmg"
+# Build number (CFBundleVersion) = the monotonic git commit count stamped by CMake.
+# Append it to the DMG name so successive builds of the same marketing version are
+# distinguishable on disk (e.g. ProPager-0.5.0-123.dmg).
+BUILD="$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' \
+    "$APP/Contents/Info.plist" 2>/dev/null)" || die "could not read build number from Info.plist"
+DMG_PATH="$DIST_DIR/${APP_NAME}-${VERSION}-${BUILD}.dmg"
 
 # ── 4. Codesign inside-out: nested code FIRST, .app LAST ─────────────────────
 #     Hardened runtime (--options runtime) + secure timestamp on everything.

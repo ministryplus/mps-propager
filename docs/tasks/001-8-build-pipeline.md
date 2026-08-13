@@ -61,13 +61,18 @@ Stand up the local build-and-ship pipeline that turns the finished Qt6/C++ app i
 The bring-up above is one-time and complete. Use this list to cut each
 subsequent versioned release.
 
-1. [ ] **Bump the version** in `CMakeLists.txt` (`MACOSX_BUNDLE_BUNDLE_VERSION`
-   + `MACOSX_BUNDLE_SHORT_VERSION_STRING`) and `src/main.cpp`
-   (`QCoreApplication::setApplicationVersion`) — keep the three in step. Commit.
-2. [ ] **Build:** `./build.sh` — produces `dist/ProPager-<version>.dmg` (name
-   derived from `CFBundleShortVersionString`), signed, notarized (**both** the
-   `.app` and the `.dmg`), stapled, universal2. It runs the `spctl` /
-   `codesign --verify --deep --strict` / `stapler validate` / `lipo` checks.
+1. [ ] **Bump the version** in ONE place — `project(ProPager VERSION x.y.z ...)`
+   in `CMakeLists.txt`. That single source of truth flows to the marketing
+   version (`CFBundleShortVersionString`), the `PROPAGER_APP_VERSION` compile
+   definition that feeds `QCoreApplication::setApplicationVersion()`, and the
+   dmg name — no other file needs touching. `CFBundleVersion` is the git
+   commit count, stamped automatically at configure time (no manual bump).
+   Commit first so the commit count that lands in the release reflects it.
+2. [ ] **Build:** `./build.sh` — produces `dist/ProPager-<version>-<build>.dmg`
+   (name = `CFBundleShortVersionString` + `CFBundleVersion` git commit count),
+   signed, notarized (**both** the `.app` and the `.dmg`), stapled, universal2.
+   It runs the `spctl` / `codesign --verify --deep --strict` /
+   `stapler validate` / `lipo` checks.
 3. [ ] **Verify the artifact:** mount the dmg and confirm — version matches;
    `spctl -a -vvv` = `accepted / source=Notarized Developer ID`; `lipo -archs` =
    `x86_64 arm64`; and the LGPL texts ship under
@@ -76,7 +81,7 @@ subsequent versioned release.
 4. [ ] **Tag** the release commit: `git tag -a v<version> -m "…"` →
    `git push origin v<version>`.
 5. [ ] **GitHub release:** `gh release create v<version> --draft`, attach
-   `dist/ProPager-<version>.dmg`, write notes → publish with
+   `dist/ProPager-<version>-<build>.dmg`, write notes → publish with
    `gh release edit v<version> --draft=false`.
 
 ### v0.5.0 — 2026-08-08 ✅ published

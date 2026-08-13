@@ -7,7 +7,7 @@ cmake_minimum_required(VERSION 3.21)
 # supports the older OS (e.g. Qt 6.5 LTS for macOS 11).
 set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS version")
 
-project(ProPager LANGUAGES CXX)
+project(ProPager VERSION 0.5.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -52,6 +52,13 @@ target_link_libraries(ProPager PRIVATE
     Qt6::WebSockets
 )
 
+# Carry the single-source-of-truth version (project(... VERSION x.y.z)) into the
+# C++ build so main.cpp can call QCoreApplication::setApplicationVersion(). Without
+# this the running app's applicationVersion() is empty even though the bundle
+# Info.plist is stamped (the tray "About ProPager" dialog reads it — see
+# traymenu.cpp).
+target_compile_definitions(ProPager PRIVATE PROPAGER_APP_VERSION="${PROJECT_VERSION}")
+
 # Menu-bar glyph (Task 8). Compiled into the binary as a Qt resource rather than
 # copied to the bundle's Resources dir: the app *reads* this icon at runtime, so
 # an embedded resource resolves identically in a dev run and a signed .app with
@@ -65,13 +72,36 @@ qt_add_resources(ProPager "menubar"
         data/MenubarTemplate@2x.png
 )
 
+# Build number — a monotonic, reproducible git commit count, stamped as
+# CFBundleVersion (kept DISTINCT from the marketing CFBundleShortVersionString).
+# App Store / notarization require CFBundleVersion to increase on every upload; a
+# commit count only ever grows and needs no committed state file. Recomputed at
+# configure time — build.sh reconfigures, so a release always picks up the current
+# count. Falls back to 0 outside a git checkout (e.g. a source tarball).
+find_package(Git QUIET)
+set(PROPAGER_BUILD_NUMBER "0")
+if(GIT_FOUND)
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" rev-list --count HEAD
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        OUTPUT_VARIABLE PROPAGER_BUILD_NUMBER
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+endif()
+if(NOT PROPAGER_BUILD_NUMBER MATCHES "^[0-9]+$")
+    set(PROPAGER_BUILD_NUMBER "0")
+endif()
+message(STATUS "ProPager version ${PROJECT_VERSION} (CFBundleVersion / build ${PROPAGER_BUILD_NUMBER})")
+
 # macOS bundle identity (Decision 11). Display name / window title is ProPager;
-# the bundle identifier drives code-signing and QSettings later.
+# the bundle identifier drives code-signing and QSettings later. The marketing
+# version is the single-source-of-truth project(... VERSION); CFBundleVersion is
+# the monotonic build number so two builds of the same version stay distinct.
 set_target_properties(ProPager PROPERTIES
     MACOSX_BUNDLE_BUNDLE_NAME "ProPager"
     MACOSX_BUNDLE_GUI_IDENTIFIER "com.isaacwiebe.propager"
-    MACOSX_BUNDLE_BUNDLE_VERSION "0.5.0"
-    MACOSX_BUNDLE_SHORT_VERSION_STRING "0.5.0"
+    MACOSX_BUNDLE_BUNDLE_VERSION "${PROPAGER_BUILD_NUMBER}"
+    MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
     MACOSX_BUNDLE_ICON_FILE "propager.icns"
 )
 

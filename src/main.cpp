@@ -64,9 +64,11 @@ int main(int argc, char *argv[])
     // so the on-disk location is correct from the very first launch.
     QCoreApplication::setOrganizationName("com.isaacwiebe");
     QCoreApplication::setApplicationName("ProPager");
-    // Surfaced in the tray's "About ProPager" dialog; keep in step with the
-    // bundle version in CMakeLists.txt (MACOSX_BUNDLE_SHORT_VERSION_STRING).
-    QCoreApplication::setApplicationVersion("0.5.0");
+    // Surfaced in the tray's "About ProPager" dialog. Single source of truth is
+    // the CMake project(... VERSION) — wired in via the PROPAGER_APP_VERSION
+    // compile definition (see CMakeLists.txt), so this never drifts from the
+    // bundle's CFBundleShortVersionString.
+    QCoreApplication::setApplicationVersion(QStringLiteral(PROPAGER_APP_VERSION));
 
     // Show DEBUG+ in the Log tab and on-disk log. Uncategorized qDebug() is
     // normally already delivered, but make it explicit so a release build or a
