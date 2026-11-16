@@ -1,5 +1,6 @@
 #include "propresenterclient.h"
 
+#include "backoff.h"
 #include "config.h"
 
 #include <QJsonDocument>
@@ -15,6 +16,11 @@ constexpr auto kTokenName = "Number";
 constexpr auto kMessageText = "VK: {Number}";
 constexpr auto kPlaceholderNumber = "142"; // shown only on first creation
 
+// Qt requests have no timeout by default; a ProPresenter that accepts the
+// connection but never answers would otherwise stall the ensure (and its
+// retries) forever.
+constexpr int kEnsureTimeoutMs = 10000;
+
 QNetworkRequest jsonRequest(const QString &url)
 {
     QNetworkRequest req{QUrl(url)};
@@ -27,6 +33,9 @@ QNetworkRequest jsonRequest(const QString &url)
 ProPresenterClient::ProPresenterClient(const Config &config, QObject *parent)
     : QObject(parent), m_config(config)
 {
+    m_retryTimer.setSingleShot(true);
+    connect(&m_retryTimer, &QTimer::timeout, this,
+            &ProPresenterClient::ensureMessage);
 }
 
 // --- Pure helpers -------------------------------------------------------
@@ -135,28 +144,49 @@ void ProPresenterClient::ensureMessage()
         m_ensureReply = nullptr;
         stale->abort();
     }
+    // This attempt supersedes any pending retry (a manual reconnect, or the
+    // retry timer itself firing).
+    m_retryTimer.stop();
 
-    qInfo().noquote() << "[ProPresenter] GET messages (ensure) ->" << apiBase();
-    QNetworkReply *reply = m_nam.get(jsonRequest(apiBase() + "/v1/messages"));
+    // Retries during an outage are silent: ProPresenter may stay closed for
+    // days while ProPager runs, and the on-disk log never rotates. The outage
+    // start and "reachable again" bracket it instead.
+    if (!m_unreachable)
+        qInfo().noquote() << "[ProPresenter] GET messages (ensure) ->" << apiBase();
+    QNetworkRequest req = jsonRequest(apiBase() + "/v1/messages");
+    req.setTransferTimeout(kEnsureTimeoutMs);
+    QNetworkReply *reply = m_nam.get(req);
     m_ensureReply = reply;
     connect(reply, &QNetworkReply::finished, this, [this, reply] {
-        if (m_ensureReply == reply)
+        // A deliberate abort (reconnect() re-entry) clears m_ensureReply
+        // before aborting; a transfer timeout also reports
+        // OperationCanceledError but leaves it set, and is a real failure.
+        const bool superseded = (m_ensureReply != reply);
+        if (!superseded)
             m_ensureReply = nullptr;
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
-            // A deliberate abort from a reconnect() re-entry is not a failure:
-            // the superseding ensure reports its own outcome.
-            if (reply->error() == QNetworkReply::OperationCanceledError) {
+            if (superseded &&
+                reply->error() == QNetworkReply::OperationCanceledError) {
                 qDebug().noquote()
                     << "[ProPresenter] ensure aborted (superseded by reconnect)";
                 return;
             }
-            emit error(QStringLiteral("Failed to reach ProPresenter: %1")
-                           .arg(reply->errorString()));
-            emit disconnected();
+            if (!m_unreachable) {
+                m_unreachable = true;
+                emit error(QStringLiteral("Failed to reach ProPresenter: %1 — "
+                                          "will keep retrying")
+                               .arg(reply->errorString()));
+                emit disconnected();
+            }
+            scheduleEnsureRetry();
             return;
         }
 
+        if (m_unreachable)
+            qInfo().noquote() << "[ProPresenter] reachable again";
+        m_unreachable = false;
+        m_retryMs = 0;
         emit connected();
         const QJsonArray messages =
             QJsonDocument::fromJson(reply->readAll()).array();
@@ -174,6 +204,12 @@ void ProPresenterClient::ensureMessage()
     });
 }
 
+void ProPresenterClient::scheduleEnsureRetry()
+{
+    m_retryMs = nextBackoffMs(m_retryMs);
+    m_retryTimer.start(m_retryMs);
+}
+
 void ProPresenterClient::reconnect()
 {
     // Re-run the connect/ensure path from current Config. Discard any stale
@@ -181,6 +217,11 @@ void ProPresenterClient::reconnect()
     // reused; ensureMessage() re-resolves (find-or-create) it. ensureMessage()
     // aborts any in-flight ensure, so a rapid double reconnect() is safe.
     m_messageId = QJsonObject();
+    // A manual reconnect starts fresh: no accumulated backoff, and its outcome
+    // is always reported (even mid-outage) so the Reconnect button gets an
+    // answer.
+    m_retryMs = 0;
+    m_unreachable = false;
     ensureMessage();
 }
 

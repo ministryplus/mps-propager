@@ -5,13 +5,17 @@
 #include <QLoggingCategory>
 #include <QMutex>
 #include <QTextStream>
-#include <QTime>
+#include <QDateTime>
 
 #include "config.h"
 #include "logbroker.h"
+#ifdef Q_OS_MACOS
+#include "macactivity.h"
+#endif
 #include "pagercontroller.h"
 #include "propresenterclient.h"
 #include "slackclient.h"
+#include "stallmonitor.h"
 #include "ui/connectionstab.h"
 #include "ui/mainwindow.h"
 #include "ui/traymenu.h"
@@ -28,7 +32,7 @@ void messageHandler(QtMsgType type, const QMessageLogContext &, const QString &m
 {
     QMutexLocker locker(&g_logMutex);
 
-    const QString line = LogBroker::formatLine(type, msg, QTime::currentTime());
+    const QString line = LogBroker::formatLine(type, msg, QDateTime::currentDateTime());
 
     // Always echo to stderr so a dev launch still shows output.
     QTextStream(stderr) << line << '\n';
@@ -88,6 +92,23 @@ int main(int argc, char *argv[])
     installFileLogging(config.configDir());
     qInfo() << "ProPager config:" << config.configPath();
     qInfo() << "ProPager log dir:" << config.configDir();
+
+    // Keep macOS from napping the app while it waits for pages, and leave
+    // evidence in the log if the event loop is ever held up anyway (or the Mac
+    // sleeps), so a missed page can be explained.
+#ifdef Q_OS_MACOS
+    MacActivity::preventAppNap(QStringLiteral("Listening for Slack pages"));
+    MacActivity::logSleepWake();
+#endif
+    StallMonitor stallMonitor;
+    QObject::connect(&stallMonitor, &StallMonitor::stalled, [](qint64 lateMs) {
+        qWarning().noquote()
+            << QStringLiteral("[app] event loop ran %1 s late (App Nap or a "
+                              "blocked loop); Slack and ProPresenter timers "
+                              "were delayed")
+                   .arg(lateMs / 1000.0, 0, 'f', 1);
+    });
+    stallMonitor.start();
 
     // Wire the coordinating core (Task 001-4). The ProPresenter client owns the
     // REST message lifecycle; the controller batches numbers and drives it on

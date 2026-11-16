@@ -9,11 +9,27 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS version")
 
 project(ProPager VERSION 0.5.1 LANGUAGES CXX)
 
+# macactivity.mm talks to Foundation/AppKit (App Nap opt-out, sleep/wake log).
+if(APPLE)
+    enable_language(OBJCXX)
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Qt meta-object compiler runs automatically on sources that need it.
 set(CMAKE_AUTOMOC ON)
+
+# Qt 6's FindWrapOpenGL.cmake links -framework AGL on every Apple platform, but
+# the macOS 26.2 SDK (Xcode 26.3) has no AGL.framework, so the final link fails even
+# though ProPager never uses AGL. Pre-create the target Qt would make, linked to
+# OpenGL only: FindWrapOpenGL returns early when WrapOpenGL::WrapOpenGL already
+# exists (verified in Qt 6.8.3). That guard is a Qt internal — re-check it when
+# moving off 6.8.3, which may also drop the AGL link itself.
+if(APPLE)
+    add_library(WrapOpenGL::WrapOpenGL INTERFACE IMPORTED)
+    target_link_libraries(WrapOpenGL::WrapOpenGL INTERFACE "-framework OpenGL")
+endif()
 
 # Network + WebSockets are declared now so later waves (ProPresenter REST,
 # Slack Socket Mode) need no build-file changes. Test drives the unit tests.
@@ -36,6 +52,8 @@ qt_add_executable(ProPager
     src/propresenterclient.cpp
     src/pagercontroller.cpp
     src/slackclient.cpp
+    src/connectionwatchdog.cpp
+    src/stallmonitor.cpp
     src/logbroker.cpp
     src/ui/mainwindow.cpp
     src/ui/traymenu.cpp
@@ -51,6 +69,11 @@ target_link_libraries(ProPager PRIVATE
     Qt6::Network
     Qt6::WebSockets
 )
+
+if(APPLE)
+    target_sources(ProPager PRIVATE src/macactivity.mm)
+    target_link_libraries(ProPager PRIVATE "-framework Foundation" "-framework AppKit")
+endif()
 
 # Carry the single-source-of-truth version (project(... VERSION x.y.z)) into the
 # C++ build so main.cpp can call QCoreApplication::setApplicationVersion(). Without
@@ -179,6 +202,7 @@ add_test(NAME tst_propresenterclient COMMAND tst_propresenterclient)
 qt_add_executable(tst_slackclient
     tests/tst_slackclient.cpp
     src/slackclient.cpp
+    src/connectionwatchdog.cpp
     src/pagercontroller.cpp
     src/propresenterclient.cpp
     src/config.cpp
@@ -194,6 +218,34 @@ target_link_libraries(tst_slackclient PRIVATE
 )
 
 add_test(NAME tst_slackclient COMMAND tst_slackclient)
+
+qt_add_executable(tst_connectionwatchdog
+    tests/tst_connectionwatchdog.cpp
+    src/connectionwatchdog.cpp
+)
+
+target_include_directories(tst_connectionwatchdog PRIVATE src)
+
+target_link_libraries(tst_connectionwatchdog PRIVATE
+    Qt6::Core
+    Qt6::Test
+)
+
+add_test(NAME tst_connectionwatchdog COMMAND tst_connectionwatchdog)
+
+qt_add_executable(tst_stallmonitor
+    tests/tst_stallmonitor.cpp
+    src/stallmonitor.cpp
+)
+
+target_include_directories(tst_stallmonitor PRIVATE src)
+
+target_link_libraries(tst_stallmonitor PRIVATE
+    Qt6::Core
+    Qt6::Test
+)
+
+add_test(NAME tst_stallmonitor COMMAND tst_stallmonitor)
 
 qt_add_executable(tst_pagercontroller
     tests/tst_pagercontroller.cpp

@@ -248,6 +248,62 @@ private slots:
         QCOMPARE(disconnects, 1);
     }
 
+    // Regression (production): ProPager launched at login before ProPresenter,
+    // the startup ensure was refused, and it never tried again — every page
+    // that morning failed "ProPager message not ready" until someone restarted
+    // the app. The client must keep retrying until ProPresenter answers, and
+    // report the outage once rather than once per attempt.
+    void ensure_retriesUntilProPresenterComesUp()
+    {
+        // Reserve a free port, then leave it closed: ProPresenter is "not
+        // running yet".
+        QTcpServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        const quint16 port = server.serverPort();
+        server.close();
+
+        connect(&server, &QTcpServer::newConnection, &server, [&] {
+            while (QTcpSocket *sock = server.nextPendingConnection()) {
+                connect(sock, &QTcpSocket::disconnected, sock,
+                        &QObject::deleteLater);
+                connect(sock, &QTcpSocket::readyRead, sock, [sock] {
+                    if (!sock->readAll().contains("\r\n\r\n"))
+                        return;
+                    // Message exists; every request (messages, clear) is OK.
+                    const QByteArray msg = "[{\"id\":{\"name\":\"ProPager\","
+                                           "\"uuid\":\"msg1\",\"index\":0}}]";
+                    sock->write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                                "Connection: close\r\nContent-Length: " +
+                                QByteArray::number(msg.size()) + "\r\n\r\n" + msg);
+                    sock->disconnectFromHost();
+                });
+            }
+        });
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        Config config(dir.filePath("ProPager.ini"));
+        config.load();
+        config.setPropresenterPort(port);
+        config.reload();
+        ProPresenterClient client(config);
+        QSignalSpy connected(&client, &ProPresenterClient::connected);
+        QSignalSpy disconnected(&client, &ProPresenterClient::disconnected);
+        QSignalSpy errors(&client, &ProPresenterClient::error);
+
+        client.ensureMessage();
+        QTRY_COMPARE_WITH_TIMEOUT(disconnected.size(), 1, 3000);
+
+        // Let at least one more refused attempt happen (1 s backoff), then
+        // ProPresenter "launches".
+        QTest::qWait(1500);
+        QCOMPARE(errors.size(), 1);       // one report for the whole outage
+        QCOMPARE(disconnected.size(), 1);
+        QVERIFY(server.listen(QHostAddress::LocalHost, port));
+
+        QTRY_COMPARE_WITH_TIMEOUT(connected.size(), 1, 6000);
+    }
+
     // Regression (live bug): a page briefly displayed stale content (the previous
     // number, or a token UUID) before the correct value appeared. Root cause: the
     // display path issued a per-page PUT *and* a trigger — the PUT re-renders the

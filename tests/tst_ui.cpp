@@ -80,18 +80,20 @@ private slots:
 
     // Warnings/criticals map to the WARN/ERROR levels the Log tab shows so a
     // ProPresenter/Slack failure reads as actionable text, not a dead modal.
-    // Each line is prefixed with a millisecond clock stamp (no date) so delays
-    // between entries are visible; the time is passed in to keep formatLine pure.
+    // Each line is prefixed with a dated, millisecond stamp so delays between
+    // entries are visible and a weeks-long on-disk log can be read by day (the
+    // undated stamp made production outages hard to place). The time is passed
+    // in to keep formatLine pure.
     void logLine_levelPrefixes()
     {
-        const QTime t(9, 8, 7, 123);
+        const QDateTime t(QDate(2026, 11, 15), QTime(9, 8, 7, 123));
         QCOMPARE(LogBroker::formatLine(QtWarningMsg,
                                        QStringLiteral("[slack] disconnected"), t),
-                 QString("[09:08:07.123] [WARN] [slack] disconnected"));
+                 QString("[2026-11-15 09:08:07.123] [WARN] [slack] disconnected"));
         QCOMPARE(LogBroker::formatLine(QtCriticalMsg, QStringLiteral("boom"), t),
-                 QString("[09:08:07.123] [ERROR] boom"));
+                 QString("[2026-11-15 09:08:07.123] [ERROR] boom"));
         QCOMPARE(LogBroker::formatLine(QtInfoMsg, QStringLiteral("hi"), t),
-                 QString("[09:08:07.123] [INFO] hi"));
+                 QString("[2026-11-15 09:08:07.123] [INFO] hi"));
     }
 
     // --- TrayMenu::warningTooltip (Task 002-6 warning-state precedence) -----
