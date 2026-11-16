@@ -7,6 +7,7 @@
 #include <QObject>
 #include <QPointer>
 #include <QString>
+#include <QTimer>
 
 class Config;
 class QNetworkReply;
@@ -131,6 +132,7 @@ private:
     QString apiBase() const;
     QString messagePath() const; // "http://.../v1/message/{id}"
     void createMessage();        // POST /v1/messages after ensure fails to find
+    void scheduleEnsureRetry();  // backoff, then re-run ensureMessage()
 
     const Config &m_config;
     QNetworkAccessManager m_nam;
@@ -139,6 +141,12 @@ private:
     // re-entry can abort it (no leaked reply, no double-resolve). Cleared when
     // the reply finishes or is aborted.
     QPointer<QNetworkReply> m_ensureReply;
+    // ProPresenter is often launched after ProPager (both at login), so a
+    // failed startup ensure retries with backoff until it answers. The outage
+    // is reported once (m_unreachable), not once per attempt.
+    QTimer m_retryTimer;
+    int m_retryMs = 0;
+    bool m_unreachable = false;
     // The number most recently handed to setNumber(); trigger() sends it as a
     // token override so the displayed value is atomic and correct.
     QString m_currentNumber;

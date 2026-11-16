@@ -7,8 +7,11 @@
 #include <QPointer>
 #include <QString>
 #include <QTimer>
+#include <QUrl>
 #include <QVector>
 #include <QWebSocket>
+
+#include "connectionwatchdog.h"
 
 class Config;
 class PagerController;
@@ -102,6 +105,11 @@ public:
     // Exponential reconnect backoff in ms: 0 -> base, else doubled up to a cap.
     static int nextBackoffMs(int currentMs);
 
+    // Test seams: point the handshake at a local fake Slack, and shrink the
+    // liveness deadlines to milliseconds. Production never calls these.
+    void setConnectionsOpenUrl(const QUrl &url);
+    void setWatchdogTiming(ConnectionWatchdog::Timing timing);
+
 public slots:
     // Begin the handshake: POST apps.connections.open, then open the socket.
     void start();
@@ -163,6 +171,13 @@ private:
     void onSocketConnected(QWebSocket *sock);
     void onSocketDisconnected(QWebSocket *sock);
     void onSocketFrame(QWebSocket *sock, const QString &frame);
+    // The socket's watchdog declared it dead (no hello, or silent too long)
+    // while the OS still thinks it is open. Abort it and recover exactly as if
+    // it had disconnected — this is the path the half-open case never reached.
+    void onSocketExpired(QWebSocket *sock, const QString &reason);
+    // Log a heartbeat line at most every kHeartbeatLogMs, so the on-disk log
+    // proves the connection was alive (or shows when it stopped).
+    void logHeartbeat(quint64 rttMs);
 
     const Config &m_config;
     PagerController *m_controller = nullptr;
@@ -179,6 +194,9 @@ private:
     // mid-handshake socket death) can abort a pending handshake instead of
     // leaking it or letting it open a competing socket.
     QPointer<QNetworkReply> m_openReply;
+    QUrl m_connectionsOpenUrl;
+    ConnectionWatchdog::Timing m_watchdogTiming;
+    QElapsedTimer m_sinceHeartbeatLog;
 };
 
 #endif // PROPAGER_SLACKCLIENT_H

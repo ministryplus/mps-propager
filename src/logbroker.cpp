@@ -6,7 +6,8 @@ LogBroker *LogBroker::instance()
     return &broker;
 }
 
-QString LogBroker::formatLine(QtMsgType type, const QString &message, QTime time)
+QString LogBroker::formatLine(QtMsgType type, const QString &message,
+                              const QDateTime &time)
 {
     const char *level = "INFO";
     switch (type) {
@@ -17,7 +18,7 @@ QString LogBroker::formatLine(QtMsgType type, const QString &message, QTime time
     case QtFatalMsg: level = "FATAL"; break;
     }
     return QStringLiteral("[%1] [%2] %3")
-        .arg(time.toString(QStringLiteral("HH:mm:ss.zzz")),
+        .arg(time.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")),
              QLatin1String(level), message);
 }
 

@@ -1,5 +1,6 @@
 #include "slackclient.h"
 
+#include "backoff.h"
 #include "config.h"
 #include "pagercontroller.h"
 
@@ -21,6 +22,21 @@ constexpr auto kUsersConversations =
 constexpr int kBaseBackoffMs = 1000;
 constexpr int kMaxBackoffMs = 30000;
 
+// Qt's network requests have NO timeout by default. A handshake that hangs
+// (typical right after the Mac wakes) would otherwise pin m_openReply forever:
+// no reconnect, and every later `disconnect` frame ignored.
+constexpr int kHandshakeTimeoutMs = 15000;
+
+// How often a healthy connection writes a heartbeat line to the log.
+constexpr qint64 kHeartbeatLogMs = 10 * 60 * 1000;
+
+// Each socket carries its own watchdog as a child, so it dies with the socket
+// and the two sockets of a graceful handoff are judged independently.
+ConnectionWatchdog *watchdogOf(QWebSocket *sock)
+{
+    return sock ? sock->findChild<ConnectionWatchdog *>() : nullptr;
+}
+
 // A JSON Web-API request authenticated with a Bearer token.
 QNetworkRequest bearerJsonRequest(const QString &url, const QString &token)
 {
@@ -34,8 +50,10 @@ QNetworkRequest bearerJsonRequest(const QString &url, const QString &token)
 
 SlackClient::SlackClient(const Config &config, PagerController *controller,
                          QObject *parent)
-    : QObject(parent), m_config(config), m_controller(controller)
+    : QObject(parent), m_config(config), m_controller(controller),
+      m_connectionsOpenUrl(QString::fromLatin1(kConnectionsOpen))
 {
+    m_sinceHeartbeatLog.start();
     m_reconnectTimer.setSingleShot(true);
     connect(&m_reconnectTimer, &QTimer::timeout, this,
             &SlackClient::openConnection);
@@ -64,9 +82,36 @@ SlackClient::SlackClient(const Config &config, PagerController *controller,
     // refresh runs two sockets at once and each handler must know which fired.
 }
 
+void SlackClient::setConnectionsOpenUrl(const QUrl &url)
+{
+    m_connectionsOpenUrl = url;
+}
+
+void SlackClient::setWatchdogTiming(ConnectionWatchdog::Timing timing)
+{
+    m_watchdogTiming = timing;
+}
+
 QWebSocket *SlackClient::makeSocket()
 {
     auto *sock = new QWebSocket(QString(), QWebSocketProtocol::VersionLatest, this);
+
+    // Liveness: armed now, so the hello deadline also covers a TCP/TLS/WS
+    // handshake that never completes. Pongs to our pings are the proof of life
+    // on an idle connection (Qt answers Slack's pings internally, unseen).
+    auto *dog = new ConnectionWatchdog(m_watchdogTiming, sock);
+    connect(dog, &ConnectionWatchdog::pingDue, this, [sock] {
+        if (sock->state() == QAbstractSocket::ConnectedState)
+            sock->ping();
+    });
+    connect(dog, &ConnectionWatchdog::expired, this,
+            [this, sock](const QString &reason) { onSocketExpired(sock, reason); });
+    connect(sock, &QWebSocket::pong, this, [this, sock, dog](quint64 elapsedMs) {
+        dog->noteActivity();
+        if (sock == m_socket)
+            logHeartbeat(elapsedMs);
+    });
+    dog->start();
     connect(sock, &QWebSocket::connected, this,
             [this, sock] { onSocketConnected(sock); });
     connect(sock, &QWebSocket::disconnected, this,
@@ -87,6 +132,10 @@ void SlackClient::retireSocket(QWebSocket *sock)
         return;
     // Detach first so the ensuing close does NOT reach onSocketDisconnected:
     // a retired socket must not trigger a reconnect or flap the status light.
+    if (ConnectionWatchdog *dog = watchdogOf(sock)) {
+        dog->stop();
+        dog->disconnect(this);
+    }
     sock->disconnect(this);
     sock->close();
     sock->deleteLater();
@@ -159,13 +208,7 @@ SlackClient::channelsFromConversations(const QJsonObject &response)
 
 int SlackClient::nextBackoffMs(int currentMs)
 {
-    if (currentMs <= 0) {
-        return kBaseBackoffMs;
-    }
-    if (currentMs >= kMaxBackoffMs) {
-        return kMaxBackoffMs;
-    }
-    return qMin(currentMs * 2, kMaxBackoffMs);
+    return ::nextBackoffMs(currentMs, kBaseBackoffMs, kMaxBackoffMs);
 }
 
 SlackClient::ParsedCommand SlackClient::parseCommand(const QString &text,
@@ -257,22 +300,29 @@ void SlackClient::requestConnection(bool graceful)
     // graceful=true opens the replacement (m_pending) while the current socket
     // keeps running; graceful=false opens the active socket (m_socket) directly.
     qDebug() << "[slack] POST apps.connections.open (app-level token)";
-    QNetworkReply *reply = m_nam.post(
-        bearerJsonRequest(kConnectionsOpen, m_config.slackAppToken()),
-        QByteArray());
+    QNetworkRequest req = bearerJsonRequest(m_connectionsOpenUrl.toString(),
+                                            m_config.slackAppToken());
+    req.setTransferTimeout(kHandshakeTimeoutMs);
+    QNetworkReply *reply = m_nam.post(req, QByteArray());
     m_openReply = reply;
     connect(reply, &QNetworkReply::finished, this, [this, reply, graceful] {
-        if (m_openReply == reply)
+        // Deliberate aborts (reconnectNow, an active-socket death during a
+        // graceful handshake) clear m_openReply BEFORE aborting. A transfer
+        // timeout also surfaces as OperationCanceledError, but leaves
+        // m_openReply pointing here — so only a superseded reply is silent.
+        const bool superseded = (m_openReply != reply);
+        if (!superseded)
             m_openReply = nullptr;
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
-            // A deliberate abort (reconnectNow, or an active-socket death during
-            // a graceful handshake) is not a failure: the superseding path
-            // reports its own outcome.
-            if (reply->error() == QNetworkReply::OperationCanceledError)
+            if (superseded &&
+                reply->error() == QNetworkReply::OperationCanceledError)
                 return;
-            emit error(QStringLiteral("apps.connections.open failed: %1")
-                           .arg(reply->errorString()));
+            const QString why =
+                reply->error() == QNetworkReply::OperationCanceledError
+                    ? QStringLiteral("timed out after %1 ms").arg(kHandshakeTimeoutMs)
+                    : reply->errorString();
+            emit error(QStringLiteral("apps.connections.open failed: %1").arg(why));
             // A graceful handshake that fails leaves the live socket untouched;
             // don't reconnect-storm. Slack will force-close it later, and that
             // death drives the ordinary backoff reconnect.
@@ -321,20 +371,48 @@ void SlackClient::scheduleReconnect()
 
 void SlackClient::onSocketConnected(QWebSocket *sock)
 {
-    m_backoffMs = 0; // healthy connection resets backoff
+    // The WebSocket is up, but Slack hasn't confirmed the session. Backoff
+    // reset, connected(), and promotion all wait for its `hello`
+    // (onSocketFrame): a socket that opens but is never confirmed is not
+    // healthy, and its watchdog will tear it down.
     if (sock == m_pending) {
-        // The replacement's WebSocket is up, but Slack hasn't confirmed the
-        // session yet. Promotion waits for its `hello` (onSocketFrame), so no
-        // message is missed in the tiny WS-open-to-hello window.
         qInfo() << "[slack] replacement connection established; awaiting hello";
         return;
     }
-    qInfo() << "[slack] Socket Mode connected";
-    emit connected();
+    qInfo() << "[slack] Socket Mode socket open; awaiting hello";
+}
+
+void SlackClient::onSocketExpired(QWebSocket *sock, const QString &reason)
+{
+    const char *which = sock == m_pending  ? "replacement"
+                        : sock == m_socket ? "active"
+                                           : "retired";
+    qWarning().noquote() << "[slack]" << which
+                         << "connection presumed dead:" << reason
+                         << "- dropping it and reconnecting";
+    // abort(), not close(): a close handshake on a dead link would just hang.
+    // Detach first so the abort's own disconnected() can't double-handle it,
+    // then run the ordinary disconnect bookkeeping ourselves.
+    sock->disconnect(this);
+    sock->abort();
+    onSocketDisconnected(sock);
+}
+
+void SlackClient::logHeartbeat(quint64 rttMs)
+{
+    if (m_sinceHeartbeatLog.elapsed() < kHeartbeatLogMs)
+        return;
+    m_sinceHeartbeatLog.restart();
+    qInfo().noquote() << QStringLiteral("[slack] heartbeat ok (pong in %1 ms)")
+                             .arg(rttMs);
 }
 
 void SlackClient::onSocketDisconnected(QWebSocket *sock)
 {
+    // Whatever closed it, this socket is finished: its watchdog must not fire
+    // between now and the deferred delete.
+    if (ConnectionWatchdog *dog = watchdogOf(sock))
+        dog->stop();
     if (sock == m_pending) {
         // The replacement died before it could take over. The live socket is
         // still serving, so this is invisible to the app unless it too is gone.
@@ -379,6 +457,8 @@ void SlackClient::onSocketFrame(QWebSocket *sock, const QString &frame)
 
     const QString frameType = envelope.value("type").toString();
     qDebug().noquote() << "[slack] frame received, type=" << frameType;
+    if (ConnectionWatchdog *dog = watchdogOf(sock))
+        dog->noteActivity();
 
     // Ack first (Slack expects the ack before the event is acted on). The ack
     // MUST go back on the socket the frame arrived on — during a graceful
@@ -400,10 +480,26 @@ void SlackClient::onSocketFrame(QWebSocket *sock, const QString &frame)
             beginGracefulReconnect();
         return;
     }
-    // The replacement's session is confirmed live: take it over now.
+    // Slack confirmed the session. A replacement takes over now; the first
+    // active socket is what the app reports as connected.
     if (frameType == QLatin1String("hello")) {
-        if (sock == m_pending)
+        if (ConnectionWatchdog *dog = watchdogOf(sock))
+            dog->noteHello();
+        m_backoffMs = 0; // a confirmed session resets backoff
+        const int lifetimeS = envelope.value("debug_info")
+                                  .toObject()
+                                  .value("approximate_connection_time")
+                                  .toInt();
+        if (lifetimeS > 0)
+            qInfo().noquote() << QStringLiteral("[slack] Slack expects to refresh "
+                                                "this connection in ~%1 min")
+                                     .arg(lifetimeS / 60);
+        if (sock == m_pending) {
             promotePending();
+        } else if (sock == m_socket) {
+            qInfo() << "[slack] Socket Mode connected";
+            emit connected();
+        }
         return;
     }
 

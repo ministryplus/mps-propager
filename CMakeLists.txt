@@ -9,6 +9,11 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS version")
 
 project(ProPager LANGUAGES CXX)
 
+# macactivity.mm talks to Foundation/AppKit (App Nap opt-out, sleep/wake log).
+if(APPLE)
+    enable_language(OBJCXX)
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -36,6 +41,8 @@ qt_add_executable(ProPager
     src/propresenterclient.cpp
     src/pagercontroller.cpp
     src/slackclient.cpp
+    src/connectionwatchdog.cpp
+    src/stallmonitor.cpp
     src/logbroker.cpp
     src/ui/mainwindow.cpp
     src/ui/traymenu.cpp
@@ -51,6 +58,11 @@ target_link_libraries(ProPager PRIVATE
     Qt6::Network
     Qt6::WebSockets
 )
+
+if(APPLE)
+    target_sources(ProPager PRIVATE src/macactivity.mm)
+    target_link_libraries(ProPager PRIVATE "-framework Foundation" "-framework AppKit")
+endif()
 
 # Menu-bar glyph (Task 8). Compiled into the binary as a Qt resource rather than
 # copied to the bundle's Resources dir: the app *reads* this icon at runtime, so
@@ -149,6 +161,7 @@ add_test(NAME tst_propresenterclient COMMAND tst_propresenterclient)
 qt_add_executable(tst_slackclient
     tests/tst_slackclient.cpp
     src/slackclient.cpp
+    src/connectionwatchdog.cpp
     src/pagercontroller.cpp
     src/propresenterclient.cpp
     src/config.cpp
@@ -164,6 +177,34 @@ target_link_libraries(tst_slackclient PRIVATE
 )
 
 add_test(NAME tst_slackclient COMMAND tst_slackclient)
+
+qt_add_executable(tst_connectionwatchdog
+    tests/tst_connectionwatchdog.cpp
+    src/connectionwatchdog.cpp
+)
+
+target_include_directories(tst_connectionwatchdog PRIVATE src)
+
+target_link_libraries(tst_connectionwatchdog PRIVATE
+    Qt6::Core
+    Qt6::Test
+)
+
+add_test(NAME tst_connectionwatchdog COMMAND tst_connectionwatchdog)
+
+qt_add_executable(tst_stallmonitor
+    tests/tst_stallmonitor.cpp
+    src/stallmonitor.cpp
+)
+
+target_include_directories(tst_stallmonitor PRIVATE src)
+
+target_link_libraries(tst_stallmonitor PRIVATE
+    Qt6::Core
+    Qt6::Test
+)
+
+add_test(NAME tst_stallmonitor COMMAND tst_stallmonitor)
 
 qt_add_executable(tst_pagercontroller
     tests/tst_pagercontroller.cpp

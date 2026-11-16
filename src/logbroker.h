@@ -3,7 +3,7 @@
 
 #include <QObject>
 #include <QString>
-#include <QTime>
+#include <QDateTime>
 #include <QtGlobal> // QtMsgType
 
 // LogBroker is the single hop between Qt's global message handler (a free
@@ -23,12 +23,13 @@ public:
     // Process-wide instance, created in the GUI thread on first use.
     static LogBroker *instance();
 
-    // "[HH:mm:ss.zzz] [LEVEL] message" — the shared on-screen/on-disk line
-    // format. The clock stamp (no date; millisecond precision so delays between
-    // entries are visible) is passed in rather than read from the wall clock, so
-    // the function stays pure and unit-tested and the format cannot drift.
+    // "[yyyy-MM-dd HH:mm:ss.zzz] [LEVEL] message" — the shared on-screen/on-disk
+    // line format. The stamp (dated, since the on-disk log spans weeks;
+    // millisecond precision so delays between entries are visible) is passed in
+    // rather than read from the wall clock, so the function stays pure and
+    // unit-tested and the format cannot drift.
     static QString formatLine(QtMsgType type, const QString &message,
-                              QTime time);
+                              const QDateTime &time);
 
     // Emit appended(line). Safe to call from the message handler; receivers
     // should connect with a queued connection so delivery hops to the GUI thread.

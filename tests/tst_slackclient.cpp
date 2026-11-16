@@ -3,9 +3,86 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QString>
+#include <QTcpServer>
+#include <QTcpSocket>
+#include <QTemporaryDir>
 #include <QVector>
+#include <QWebSocket>
+#include <QWebSocketServer>
 
+#include "config.h"
 #include "slackclient.h"
+
+namespace {
+
+// A local stand-in for Slack: an HTTP stub answering apps.connections.open
+// with a ws:// URL to a local QWebSocketServer. `sendHello` controls whether
+// the "Slack" side confirms each session, which is what the watchdog keys on.
+// QWebSocketServer answers pings itself, like Slack does.
+class FakeSlack : public QObject
+{
+public:
+    explicit FakeSlack(bool sendHello) : m_sendHello(sendHello)
+    {
+        m_ws.listen(QHostAddress::LocalHost);
+        connect(&m_ws, &QWebSocketServer::newConnection, this, [this] {
+            while (QWebSocket *sock = m_ws.nextPendingConnection()) {
+                sock->setParent(this);
+                ++wsConnections;
+                if (m_sendHello)
+                    sock->sendTextMessage(QStringLiteral(R"({"type":"hello"})"));
+            }
+        });
+
+        m_http.listen(QHostAddress::LocalHost);
+        connect(&m_http, &QTcpServer::newConnection, this, [this] {
+            while (QTcpSocket *conn = m_http.nextPendingConnection()) {
+                conn->setParent(this);
+                connect(conn, &QTcpSocket::readyRead, conn, [this, conn] {
+                    m_buf[conn] += conn->readAll();
+                    if (!m_buf[conn].contains("\r\n\r\n"))
+                        return;
+                    ++openCalls;
+                    const QByteArray body =
+                        QStringLiteral(R"({"ok":true,"url":"ws://127.0.0.1:%1/"})")
+                            .arg(m_ws.serverPort())
+                            .toUtf8();
+                    conn->write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                                "Connection: close\r\nContent-Length: " +
+                                QByteArray::number(body.size()) + "\r\n\r\n" + body);
+                    conn->disconnectFromHost();
+                });
+            }
+        });
+    }
+
+    QUrl openUrl() const
+    {
+        return QUrl(QStringLiteral("http://127.0.0.1:%1/api/apps.connections.open")
+                        .arg(m_http.serverPort()));
+    }
+
+    int openCalls = 0;
+    int wsConnections = 0;
+
+private:
+    bool m_sendHello;
+    QWebSocketServer m_ws{QStringLiteral("fake-slack"),
+                          QWebSocketServer::NonSecureMode};
+    QTcpServer m_http;
+    QHash<QTcpSocket *, QByteArray> m_buf;
+};
+
+ConnectionWatchdog::Timing fastWatchdog()
+{
+    ConnectionWatchdog::Timing t;
+    t.pingIntervalMs = 30;
+    t.staleAfterMs = 200;
+    t.helloDeadlineMs = 150;
+    return t;
+}
+
+} // namespace
 
 // Unit tests for SlackClient's pure envelope/response logic (Task 001-5). The
 // live Socket Mode + Web API round-trips require real Slack tokens and are
@@ -202,6 +279,57 @@ private slots:
     {
         QCOMPARE(SlackClient::parseCommand("hello team", {}, true).action,
                  SlackClient::MessageAction::Ignore);
+    }
+
+    // --- Connection liveness against a local fake Slack -------------------
+
+private slots:
+    // Regression (production): a socket that never gets Slack's `hello` used
+    // to sit forever with no reconnect. The hello deadline must tear it down
+    // and re-run the handshake.
+    void liveness_noHelloTriggersReconnect()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        Config config(dir.filePath("ProPager.ini"));
+        config.load();
+        FakeSlack slack(/*sendHello=*/false);
+        SlackClient client(config);
+        client.setConnectionsOpenUrl(slack.openUrl());
+        client.setWatchdogTiming(fastWatchdog());
+        QSignalSpy connected(&client, &SlackClient::connected);
+
+        client.start();
+
+        // First handshake, hello deadline, 1 s backoff, second handshake.
+        QTRY_VERIFY_WITH_TIMEOUT(slack.openCalls >= 2, 4000);
+        // An unconfirmed session is never reported as connected.
+        QCOMPARE(connected.size(), 0);
+    }
+
+    // A healthy connection stays up: our pings draw pongs (Qt answers them on
+    // the server side, as Slack does), which keep the watchdog satisfied well
+    // past its stale window. connected() fires once, on Slack's hello.
+    void liveness_healthyConnectionStaysUp()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        Config config(dir.filePath("ProPager.ini"));
+        config.load();
+        FakeSlack slack(/*sendHello=*/true);
+        SlackClient client(config);
+        client.setConnectionsOpenUrl(slack.openUrl());
+        client.setWatchdogTiming(fastWatchdog());
+        QSignalSpy connected(&client, &SlackClient::connected);
+        QSignalSpy disconnected(&client, &SlackClient::disconnected);
+
+        client.start();
+
+        QTRY_COMPARE_WITH_TIMEOUT(connected.size(), 1, 3000);
+        QTest::qWait(800); // 4x the stale window, with no app traffic
+        QCOMPARE(disconnected.size(), 0);
+        QCOMPARE(slack.openCalls, 1);
+        QCOMPARE(slack.wsConnections, 1);
     }
 };
 
