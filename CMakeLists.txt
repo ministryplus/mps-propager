@@ -20,6 +20,17 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Qt meta-object compiler runs automatically on sources that need it.
 set(CMAKE_AUTOMOC ON)
 
+# Qt 6's FindWrapOpenGL.cmake links -framework AGL on every Apple platform, but
+# the macOS 26.2 SDK (Xcode 26.3) has no AGL.framework, so the final link fails even
+# though ProPager never uses AGL. Pre-create the target Qt would make, linked to
+# OpenGL only: FindWrapOpenGL returns early when WrapOpenGL::WrapOpenGL already
+# exists (verified in Qt 6.8.3). That guard is a Qt internal — re-check it when
+# moving off 6.8.3, which may also drop the AGL link itself.
+if(APPLE)
+    add_library(WrapOpenGL::WrapOpenGL INTERFACE IMPORTED)
+    target_link_libraries(WrapOpenGL::WrapOpenGL INTERFACE "-framework OpenGL")
+endif()
+
 # Network + WebSockets are declared now so later waves (ProPresenter REST,
 # Slack Socket Mode) need no build-file changes. Test drives the unit tests.
 find_package(Qt6 REQUIRED COMPONENTS Widgets Network WebSockets Test)
